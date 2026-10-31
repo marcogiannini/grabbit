@@ -212,4 +212,7 @@ jobs:
           name: Grabbit ${{ needs.prepare.outputs.version }}
           files: release/*
           fail_on_unmatched_files: true
+          # testo fisso in cima alle note; sotto GitHub aggiunge l'elenco automatico delle modifiche
+          body: |
+            Questo programma è stato scritto con l'aiuto di [Claude](https://claude.ai), l'assistente AI di Anthropic.
           generate_release_notes: true

@@ -10,10 +10,15 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 
-const ACCENT: Color32 = Color32::from_rgb(142, 84, 233);
+// Tema scuro con accento arancione.
+const ACCENT: Color32 = Color32::from_rgb(249, 115, 22);
+/// Arancione più chiaro: contorni e focus.
+const ACCENT_LIGHT: Color32 = Color32::from_rgb(251, 146, 60);
+/// Testo sopra uno sfondo arancione (il bianco avrebbe poco contrasto).
+const ON_ACCENT: Color32 = Color32::from_rgb(26, 15, 5);
 const OK: Color32 = Color32::from_rgb(64, 185, 120);
 const ERR: Color32 = Color32::from_rgb(235, 87, 87);
-const WARN: Color32 = Color32::from_rgb(230, 160, 50);
+const WARN: Color32 = Color32::from_rgb(240, 205, 70);
 
 const VIDEO_FORMATS: [(&str, &str); 3] = [("mp4", "MP4"), ("mkv", "MKV"), ("webm", "WebM")];
 const HEIGHTS: [(u32, &str); 7] = [
@@ -129,6 +134,8 @@ impl App {
             update: UpdateUi::None,
             logo,
         };
+        cc.egui_ctx
+            .set_zoom_factor(app.cfg.ui_scale.clamp(0.8, 2.0));
         app.start_setup(&cc.egui_ctx);
         app
     }
@@ -358,7 +365,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.image((self.logo.id(), egui::vec2(46.0, 46.0)));
             ui.vertical(|ui| {
-                ui.label(RichText::new("Grabbit").size(24.0).strong());
+                ui.label(RichText::new("Grabbit").size(28.0).strong());
                 ui.label(
                     RichText::new("Video e musica da YouTube e Spotify")
                         .color(ui.visuals().weak_text_color()),
@@ -500,16 +507,20 @@ impl App {
     fn options_card(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(
-                    &mut self.cfg.mode,
-                    Mode::Video,
-                    RichText::new("  Video  ").size(16.0),
-                );
-                ui.selectable_value(
-                    &mut self.cfg.mode,
-                    Mode::Audio,
-                    RichText::new("  Audio (musica)  ").size(16.0),
-                );
+                for (mode, label) in [
+                    (Mode::Video, "  Video  "),
+                    (Mode::Audio, "  Audio (musica)  "),
+                ] {
+                    let selected = self.cfg.mode == mode;
+                    let text = RichText::new(label).size(16.0).color(if selected {
+                        ON_ACCENT
+                    } else {
+                        ui.visuals().text_color()
+                    });
+                    if ui.selectable_label(selected, text).clicked() {
+                        self.cfg.mode = mode;
+                    }
+                }
             });
             ui.add_space(6.0);
 
@@ -620,6 +631,26 @@ impl App {
                         });
                 });
                 ui.label(RichText::new("Utile per video con restrizioni d'età o quando YouTube chiede di dimostrare che non sei un robot.").small().color(ui.visuals().weak_text_color()));
+                ui.horizontal(|ui| {
+                    ui.label("Dimensione del testo");
+                    let sizes = [(1.0_f32, "Normale"), (1.15, "Grande"), (1.3, "Molto grande"), (1.5, "Enorme")];
+                    let current = sizes
+                        .iter()
+                        .find(|(v, _)| (self.cfg.ui_scale - v).abs() < 0.01)
+                        .map(|(_, l)| *l)
+                        .unwrap_or("Personalizzata");
+                    egui::ComboBox::from_id_salt("scale")
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            for (v, l) in sizes {
+                                if ui.selectable_value(&mut self.cfg.ui_scale, v, l).clicked() {
+                                    ctx.set_zoom_factor(v);
+                                    self.cfg.save();
+                                }
+                            }
+                        });
+                    ui.label(RichText::new("(oppure Ctrl + e Ctrl −)").small().color(ui.visuals().weak_text_color()));
+                });
                 ui.checkbox(&mut self.cfg.auto_update_app, "Installa automaticamente gli aggiornamenti di Grabbit");
                 ui.horizontal(|ui| {
                     if ui.add_enabled(!self.tools.busy && !self.running, egui::Button::new("Aggiorna yt-dlp ora")).clicked() {
@@ -638,22 +669,38 @@ impl App {
         let ready = self.tools.ytdlp.is_some() && !self.tools.busy;
         ui.horizontal(|ui| {
             if self.running {
-                let btn = egui::Button::new(RichText::new("   Annulla   ").size(17.0))
+                let btn = egui::Button::new(RichText::new("   Annulla   ").size(18.0))
                     .min_size(egui::vec2(0.0, 38.0));
                 if ui.add(btn).clicked() {
                     self.cancel.store(true, Ordering::Relaxed);
                 }
                 ui.spinner();
             } else {
+                let enabled = ready && has_input;
+                // attivo: arancione con testo scuro; disattivato: grigio, ben leggibile
+                let (fill, text_color) = if enabled {
+                    (ACCENT, ON_ACCENT)
+                } else {
+                    (
+                        Color32::from_rgb(44, 44, 49),
+                        Color32::from_rgb(130, 130, 138),
+                    )
+                };
                 let btn = egui::Button::new(
                     RichText::new("   Scarica   ")
-                        .size(17.0)
+                        .size(18.0)
                         .strong()
-                        .color(Color32::WHITE),
+                        .color(text_color),
                 )
-                .fill(ACCENT)
+                .fill(fill)
                 .min_size(egui::vec2(0.0, 38.0));
-                if ui.add_enabled(ready && has_input, btn).clicked() {
+                // niente add_enabled: egui sfumerebbe ancora il testo; basta non rendere cliccabile il pulsante
+                let btn = btn.sense(if enabled {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                });
+                if ui.add(btn).clicked() {
                     self.start_download(ctx);
                 }
                 if !self.jobs.is_empty() && ui.button("Pulisci elenco").clicked() {
@@ -768,15 +815,74 @@ fn load_logo(ctx: &egui::Context) -> egui::TextureHandle {
 }
 
 fn configure_style(ctx: &egui::Context) {
+    // sempre scuro, anche se il sistema è in modalità chiara
+    ctx.set_theme(egui::ThemePreference::Dark);
     ctx.all_styles_mut(|style| {
-        style.spacing.item_spacing = egui::vec2(8.0, 6.0);
+        style.spacing.item_spacing = egui::vec2(8.0, 7.0);
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
-        style.visuals.selection.bg_fill = ACCENT;
-        style.visuals.hyperlink_color = ACCENT;
+
+        // corpi del testo più grandi (di serie sono 12.5 / 9 / 12.5)
+        use egui::{FontFamily, FontId, TextStyle};
+        style
+            .text_styles
+            .insert(TextStyle::Body, FontId::new(15.5, FontFamily::Proportional));
+        style.text_styles.insert(
+            TextStyle::Button,
+            FontId::new(15.5, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Small,
+            FontId::new(13.0, FontFamily::Proportional),
+        );
+        style.text_styles.insert(
+            TextStyle::Monospace,
+            FontId::new(14.0, FontFamily::Monospace),
+        );
+        style.text_styles.insert(
+            TextStyle::Heading,
+            FontId::new(24.0, FontFamily::Proportional),
+        );
+        style.spacing.interact_size.y = 28.0; // bersagli più comodi da cliccare
+
+        let v = &mut style.visuals;
+        v.dark_mode = true;
+        // testo: chiaro (14:1 sullo sfondo), secondario ben leggibile (8:1)
+        v.widgets.noninteractive.fg_stroke =
+            egui::Stroke::new(1.0, Color32::from_rgb(226, 226, 232));
+        v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(232, 232, 238));
+        v.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, Color32::WHITE);
+        v.weak_text_color = Some(Color32::from_rgb(172, 172, 182));
+        v.panel_fill = Color32::from_rgb(20, 20, 22);
+        v.window_fill = Color32::from_rgb(26, 26, 29);
+        v.extreme_bg_color = Color32::from_rgb(12, 12, 14); // sfondo dei campi di testo
+        v.faint_bg_color = Color32::from_rgb(28, 28, 31);
+        v.override_text_color = None;
+
+        // accento arancione: selezione, barra di avanzamento, link, bordo del campo con focus
+        v.selection.bg_fill = ACCENT;
+        v.selection.stroke = egui::Stroke::new(1.0, ACCENT_LIGHT);
+        v.hyperlink_color = ACCENT_LIGHT;
+
+        v.widgets.noninteractive.bg_fill = Color32::from_rgb(28, 28, 31);
+        v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(52, 52, 57));
+        v.widgets.inactive.bg_fill = Color32::from_rgb(44, 44, 49);
+        // contorno ben visibile su caselle, menu e pulsanti (prima si confondevano con lo sfondo)
+        v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, Color32::from_rgb(104, 104, 114));
+        v.widgets.inactive.weak_bg_fill = Color32::from_rgb(44, 44, 49);
+        v.widgets.hovered.bg_fill = Color32::from_rgb(58, 52, 48);
+        v.widgets.hovered.weak_bg_fill = Color32::from_rgb(58, 52, 48);
+        v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, ACCENT);
+        v.widgets.active.bg_fill = ACCENT;
+        v.widgets.active.weak_bg_fill = ACCENT;
+        v.widgets.active.bg_stroke = egui::Stroke::new(1.0, ACCENT_LIGHT);
+        v.widgets.open.bg_fill = Color32::from_rgb(58, 52, 48);
+        v.widgets.open.weak_bg_fill = Color32::from_rgb(58, 52, 48);
+
         let r = egui::CornerRadius::same(8);
-        style.visuals.widgets.noninteractive.corner_radius = r;
-        style.visuals.widgets.inactive.corner_radius = r;
-        style.visuals.widgets.hovered.corner_radius = r;
-        style.visuals.widgets.active.corner_radius = r;
+        v.widgets.noninteractive.corner_radius = r;
+        v.widgets.inactive.corner_radius = r;
+        v.widgets.hovered.corner_radius = r;
+        v.widgets.active.corner_radius = r;
+        v.widgets.open.corner_radius = r;
     });
 }

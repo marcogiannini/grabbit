@@ -28,9 +28,9 @@ def lerp(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-# --- sfondo: quadrato arrotondato con gradiente corallo -> viola ------------
+# --- sfondo: quadrato arrotondato con gradiente arancione (come l'interfaccia) ---
 # (il gradiente si calcola a bassa risoluzione e si ingrandisce: è liscio)
-small = gradient(256, (255, 94, 98), (112, 52, 235))
+small = gradient(256, (255, 168, 64), (222, 72, 8))
 bg = small.resize((S, S), Image.BICUBIC).convert("RGBA")
 
 mask = Image.new("L", (S, S), 0)
@@ -77,7 +77,7 @@ d.rounded_rectangle((S * 0.685, S * 0.675, S * 0.745, S * 0.80),
 
 # ombra morbida sotto il simbolo
 shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-shadow.paste((50, 10, 90, 120), (0, int(S * 0.012)), sym.split()[3])
+shadow.paste((90, 28, 0, 130), (0, int(S * 0.012)), sym.split()[3])
 shadow = shadow.filter(ImageFilter.GaussianBlur(S * 0.018))
 icon = Image.alpha_composite(icon, shadow)
 icon = Image.alpha_composite(icon, sym)

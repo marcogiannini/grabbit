@@ -71,6 +71,16 @@ pub fn check() -> Result<Option<Release>> {
     parse_release(&v, CURRENT)
 }
 
+/// Note da mostrare nell'app: tolgono la riga di credito che sta solo nella pagina GitHub.
+fn clean_notes(body: &str) -> String {
+    body.lines()
+        .filter(|l| !l.contains("è stato scritto con l'aiuto di"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 /// Confronta la release GitHub con la versione in uso.
 fn parse_release(v: &serde_json::Value, current: &str) -> Result<Option<Release>> {
     let tag = v["tag_name"]
@@ -88,7 +98,7 @@ fn parse_release(v: &serde_json::Value, current: &str) -> Result<Option<Release>
         .map(String::from);
     Ok(Some(Release {
         version: latest.to_string(),
-        notes: v["body"].as_str().unwrap_or("").to_string(),
+        notes: clean_notes(v["body"].as_str().unwrap_or("")),
         page_url: v["html_url"].as_str().unwrap_or("").to_string(),
         asset_url,
     }))
@@ -177,6 +187,17 @@ mod tests {
         assert_eq!(r.version, "9.9.9");
         assert_eq!(r.asset_url.as_deref(), Some("https://example.org/asset"));
         assert_eq!(r.notes, "novità");
+    }
+
+    #[test]
+    fn credit_line_is_hidden_in_app_notes() {
+        let body = "Questo programma è stato scritto con l'aiuto di [Claude](https://claude.ai), l'assistente AI di Anthropic.\n\n## Cosa cambia\n* Tema scuro";
+        assert_eq!(clean_notes(body), "## Cosa cambia\n* Tema scuro");
+        assert_eq!(
+            clean_notes("solo credito: è stato scritto con l'aiuto di X"),
+            ""
+        );
+        assert_eq!(clean_notes("novità"), "novità");
     }
 
     #[test]

@@ -26,6 +26,8 @@ pub struct Config {
     /// "" = nessuno, altrimenti "chrome", "firefox", ...
     pub cookies_browser: String,
     pub auto_update_app: bool,
+    /// ingrandimento dell'interfaccia (1.0 = normale)
+    pub ui_scale: f32,
 }
 
 impl Default for Config {
@@ -48,6 +50,7 @@ impl Default for Config {
             embed_meta: true,
             cookies_browser: String::new(),
             auto_update_app: true,
+            ui_scale: 1.0,
         }
     }
 }
