@@ -23,16 +23,46 @@ pub struct Release {
     pub asset_url: Option<String>,
 }
 
-/// "owner/repo" ricavato da Cargo.toml, `None` finché c'è il segnaposto OWNER.
-fn repo() -> Option<String> {
-    let url = env!("CARGO_PKG_REPOSITORY")
-        .trim_end_matches('/')
-        .trim_end_matches(".git");
-    let r = url.split("github.com/").nth(1)?.to_string();
-    (!r.starts_with("OWNER/")).then_some(r)
+/// Argomento con cui l'app si riavvia dopo un aggiornamento: in quella esecuzione l'aggiornamento
+/// automatico è disattivato, così una release sbagliata non può causare un ciclo infinito.
+pub const AFTER_UPDATE_ARG: &str = "--after-update";
+
+/// "owner/repo" da un indirizzo GitHub; `None` finché c'è il segnaposto OWNER.
+fn repo_from_url(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let r = url
+        .split("github.com/")
+        .nth(1)?
+        .trim_matches('/')
+        .to_string();
+    (r.contains('/') && !r.starts_with("OWNER/")).then_some(r)
 }
 
-fn asset_name() -> Option<String> {
+/// Repository GitHub in cui cercare le release. Nelle build di GitHub è quello stesso
+/// repository (variabile GRABBIT_REPO impostata dal workflow); altrimenti vale il campo
+/// `repository` di Cargo.toml.
+pub fn repository() -> Option<String> {
+    if let Some(r) = option_env!("GRABBIT_REPO") {
+        let r = r.trim();
+        if r.contains('/') && !r.starts_with("OWNER/") {
+            return Some(r.to_string());
+        }
+    }
+    repo_from_url(env!("CARGO_PKG_REPOSITORY"))
+}
+
+/// Indirizzo dell'API di GitHub. Nelle build di sviluppo si può sostituire (GRABBIT_API_BASE)
+/// per provare l'aggiornamento con un finto server; nelle release questa possibilità non esiste.
+fn api_base() -> String {
+    if cfg!(debug_assertions) {
+        if let Ok(v) = std::env::var("GRABBIT_API_BASE") {
+            return v.trim_end_matches('/').to_string();
+        }
+    }
+    "https://api.github.com".to_string()
+}
+
+pub fn asset_name() -> Option<String> {
     let arch = std::env::consts::ARCH; // x86_64 | aarch64
     Some(match std::env::consts::OS {
         "windows" => format!("grabbit-windows-{arch}.exe"),
@@ -51,24 +81,50 @@ pub fn supported() -> bool {
     }
 }
 
-pub fn check() -> Result<Option<Release>> {
-    let Some(repo) = repo() else { return Ok(None) };
-    let v = match net::get_json(&format!(
-        "https://api.github.com/repos/{repo}/releases/latest"
-    )) {
-        Ok(v) => v,
-        Err(e) => {
-            // 404 = il repository non ha ancora nessuna release
-            let not_found = e.chain().any(|c| {
-                matches!(
-                    c.downcast_ref::<ureq::Error>(),
-                    Some(ureq::Error::StatusCode(404))
-                )
-            });
-            return if not_found { Ok(None) } else { Err(e) };
-        }
+/// Esito del controllo degli aggiornamenti.
+#[derive(Clone, Debug)]
+pub enum Check {
+    /// repository non impostato: non si sa dove cercare
+    NotConfigured,
+    /// il repository non ha ancora nessuna release (o è privato)
+    NoRelease,
+    UpToDate,
+    Newer(Release),
+}
+
+pub fn check() -> Result<Check> {
+    let Some(repo) = repository() else {
+        return Ok(Check::NotConfigured);
     };
-    parse_release(&v, CURRENT)
+    let url = format!("{}/repos/{repo}/releases/latest", api_base());
+    let v = match net::get_json(&url) {
+        Ok(v) => v,
+        Err(e) if status_code(&e) == Some(404) => return Ok(Check::NoRelease),
+        Err(e) => return Err(e),
+    };
+    Ok(match parse_release(&v, CURRENT)? {
+        Some(r) => Check::Newer(r),
+        None => Check::UpToDate,
+    })
+}
+
+fn status_code(e: &anyhow::Error) -> Option<u16> {
+    e.chain()
+        .find_map(|c| match c.downcast_ref::<ureq::Error>() {
+            Some(ureq::Error::StatusCode(code)) => Some(*code),
+            _ => None,
+        })
+}
+
+/// Messaggio comprensibile per un errore del controllo.
+pub fn describe_error(e: &anyhow::Error) -> String {
+    match status_code(e) {
+        Some(403) | Some(429) => {
+            "GitHub ha limitato le richieste, riprova tra qualche minuto".into()
+        }
+        Some(code) => format!("GitHub ha risposto con errore {code}"),
+        None => format!("{e:#}"),
+    }
 }
 
 /// Note da mostrare nell'app: tolgono la riga di credito che sta solo nella pagina GitHub.
@@ -159,7 +215,7 @@ pub fn restart() -> ! {
         std::env::current_exe().ok()
     };
     if let Some(e) = exe {
-        let _ = std::process::Command::new(e).spawn();
+        let _ = std::process::Command::new(e).arg(AFTER_UPDATE_ARG).spawn();
     }
     std::process::exit(0)
 }
@@ -224,8 +280,31 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_repository_disables_checks() {
-        assert!(repo().is_none()); // finché in Cargo.toml c'è OWNER
+    fn repository_from_url() {
+        assert_eq!(repo_from_url("https://github.com/OWNER/grabbit"), None); // segnaposto
+        assert_eq!(
+            repo_from_url("https://github.com/mario/grabbit"),
+            Some("mario/grabbit".into())
+        );
+        assert_eq!(
+            repo_from_url("https://github.com/mario/grabbit.git"),
+            Some("mario/grabbit".into())
+        );
+        assert_eq!(
+            repo_from_url("https://github.com/mario/grabbit/"),
+            Some("mario/grabbit".into())
+        );
+        assert_eq!(repo_from_url("https://example.org/x"), None);
+        assert_eq!(repo_from_url(""), None);
+    }
+
+    #[test]
+    fn errors_are_described() {
+        let e = anyhow::Error::new(ureq::Error::StatusCode(403));
+        assert!(describe_error(&e).contains("limitato"));
+        let e = anyhow::Error::new(ureq::Error::StatusCode(500));
+        assert!(describe_error(&e).contains("500"));
+        assert_eq!(status_code(&anyhow::anyhow!("altro")), None);
     }
 
     /// GRABBIT_TEST_ASSET_URL=http://127.0.0.1:8767/grabbit-linux-x86_64.AppImage cargo test apply_ -- --ignored

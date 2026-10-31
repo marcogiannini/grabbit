@@ -58,7 +58,7 @@ enum Msg {
         warnings: Vec<String>,
     },
     ToolsFailed(String),
-    Release(Option<Release>),
+    UpdateCheck(Result<selfupdate::Check, String>),
     UpdateStatus(String),
     UpdateDone(Result<(), String>),
     Folder(PathBuf),
@@ -112,6 +112,13 @@ pub struct App {
     cancel: Arc<AtomicBool>,
     log: Vec<String>,
     update: UpdateUi,
+    /// ultimo esito del controllo aggiornamenti, sempre visibile in fondo alla finestra
+    update_status: String,
+    update_checking: bool,
+    /// false dopo un riavvio per aggiornamento: niente nuovo aggiornamento automatico
+    auto_install: bool,
+    /// l'aggiornamento in corso è partito da solo (non da un clic): a fine lavoro si riavvia
+    update_auto: bool,
     logo: egui::TextureHandle,
 }
 
@@ -132,11 +139,17 @@ impl App {
             cancel: Arc::new(AtomicBool::new(false)),
             log: Vec::new(),
             update: UpdateUi::None,
+            update_status: String::new(),
+            update_checking: false,
+            auto_install: !std::env::args().any(|a| a == selfupdate::AFTER_UPDATE_ARG),
+            update_auto: false,
             logo,
         };
         cc.egui_ctx
             .set_zoom_factor(app.cfg.ui_scale.clamp(0.8, 2.0));
         app.start_setup(&cc.egui_ctx);
+        // il controllo degli aggiornamenti parte subito, senza aspettare yt-dlp e ffmpeg
+        app.start_update_check(&cc.egui_ctx);
         app
     }
 
@@ -149,7 +162,7 @@ impl App {
         }
     }
 
-    /// Scarica/aggiorna yt-dlp, Deno e ffmpeg, poi controlla gli aggiornamenti dell'app.
+    /// Scarica/aggiorna yt-dlp, Deno e ffmpeg.
     fn start_setup(&mut self, ctx: &egui::Context) {
         self.tools.busy = true;
         self.tools.error = None;
@@ -177,11 +190,22 @@ impl App {
                 deno,
                 warnings,
             });
-            send(Msg::Release(selfupdate::check().unwrap_or(None)));
         });
     }
 
-    fn start_update(&mut self, ctx: &egui::Context, rel: Release) {
+    /// Cerca una nuova versione di Grabbit su GitHub (in un thread a parte).
+    fn start_update_check(&mut self, ctx: &egui::Context) {
+        self.update_checking = true;
+        self.update_status = "Controllo aggiornamenti…".into();
+        let send = self.sender(ctx);
+        thread::spawn(move || {
+            let r = selfupdate::check().map_err(|e| selfupdate::describe_error(&e));
+            send(Msg::UpdateCheck(r));
+        });
+    }
+
+    fn start_update(&mut self, ctx: &egui::Context, rel: Release, auto: bool) {
+        self.update_auto = auto;
         self.update = UpdateUi::Working("Avvio aggiornamento…".into());
         let send = self.sender(ctx);
         thread::spawn(move || {
@@ -255,16 +279,41 @@ impl App {
                 self.tools.busy = false;
                 self.tools.error = Some(e);
             }
-            Msg::Release(Some(rel)) => {
-                if self.cfg.auto_update_app && selfupdate::supported() && rel.asset_url.is_some() {
-                    self.start_update(ctx, rel);
-                } else {
-                    self.update = UpdateUi::Available(rel);
-                }
+            Msg::UpdateCheck(result) => {
+                self.update_checking = false;
+                use selfupdate::Check;
+                self.update_status = match result {
+                    Err(e) => format!("Controllo aggiornamenti non riuscito: {e}"),
+                    Ok(Check::NotConfigured) => "Aggiornamenti non attivi: repository GitHub non impostato (campo repository di Cargo.toml)".into(),
+                    Ok(Check::NoRelease) => format!(
+                        "Nessuna release trovata su GitHub ({}). Se il repository è privato, l'app non può leggerlo.",
+                        selfupdate::repository().unwrap_or_default()
+                    ),
+                    Ok(Check::UpToDate) => format!("Grabbit {} è aggiornato", selfupdate::CURRENT),
+                    Ok(Check::Newer(rel)) => {
+                        let msg = format!("Disponibile la versione {}", rel.version);
+                        if self.cfg.auto_update_app
+                            && self.auto_install
+                            && selfupdate::supported()
+                            && rel.asset_url.is_some()
+                            && !matches!(self.update, UpdateUi::Working(_))
+                        {
+                            self.start_update(ctx, rel, true);
+                        } else {
+                            self.update = UpdateUi::Available(rel);
+                        }
+                        msg
+                    }
+                };
             }
-            Msg::Release(None) => {}
             Msg::UpdateStatus(s) => self.update = UpdateUi::Working(s),
             Msg::UpdateDone(Ok(())) => {
+                // aggiornamento partito da solo all'avvio: si riavvia da sé, a meno che
+                // nel frattempo non sia iniziato un download
+                if self.update_auto && !self.running {
+                    self.cfg.save();
+                    selfupdate::restart();
+                }
                 self.update =
                     UpdateUi::Ready("Aggiornamento installato. Riavvia per usarlo.".into())
             }
@@ -395,6 +444,24 @@ impl App {
                             ui.hyperlink_to("Scarica dal sito", &rel.page_url);
                         }
                     });
+                    if rel.asset_url.is_none() {
+                        ui.label(
+                            RichText::new(format!(
+                                "La release non contiene il file «{}» per questo sistema.",
+                                selfupdate::asset_name().unwrap_or_default()
+                            ))
+                            .small()
+                            .color(WARN),
+                        );
+                    } else if !selfupdate::supported() {
+                        ui.label(
+                            RichText::new(
+                                "Per aggiornarsi da sola, l'app va avviata dal file AppImage.",
+                            )
+                            .small()
+                            .color(ui.visuals().weak_text_color()),
+                        );
+                    }
                     let notes = rel.notes.trim();
                     if !notes.is_empty() {
                         ui.collapsing("Novità", |ui| {
@@ -428,7 +495,7 @@ impl App {
             }
         }
         if let Some(r) = start {
-            self.start_update(ctx, r);
+            self.start_update(ctx, r, false);
         }
         if restart {
             selfupdate::restart();
@@ -653,6 +720,11 @@ impl App {
                 });
                 ui.checkbox(&mut self.cfg.auto_update_app, "Installa automaticamente gli aggiornamenti di Grabbit");
                 ui.horizontal(|ui| {
+                    let can_check = !self.update_checking && !matches!(self.update, UpdateUi::Working(_));
+                    if ui.add_enabled(can_check, egui::Button::new("Controlla aggiornamenti di Grabbit")).clicked() {
+                        self.auto_install = true;
+                        self.start_update_check(ctx);
+                    }
                     if ui.add_enabled(!self.tools.busy && !self.running, egui::Button::new("Aggiorna yt-dlp ora")).clicked() {
                         self.start_setup(ctx);
                     }
@@ -777,6 +849,13 @@ impl App {
             .small()
             .color(ui.visuals().weak_text_color()),
         );
+        if !self.update_status.is_empty() {
+            ui.label(
+                RichText::new(&self.update_status)
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
+            );
+        }
         ui.label(
             RichText::new("Usalo solo per contenuti che hai il diritto di scaricare, nel rispetto del copyright e dei termini dei servizi.")
                 .small()

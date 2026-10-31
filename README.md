@@ -8,14 +8,18 @@ Scritto in Rust (leggero: l'AppImage pesa circa 4 MB), si appoggia a
 
 - **Video**: MP4 / MKV / WebM, qualità massima a scelta (fino a 4K).
 - **Audio**: MP3, M4A (AAC), Opus, OGG Vorbis, FLAC, WAV, con scelta del **bitrate**.
-- Cartella di destinazione a scelta, più link in un colpo solo (uno per riga), playlist.
+- Cartella di destinazione a scelta, più link in un colpo solo (uno per riga).
+- **Playlist**: i file vanno in una cartella con il nome della playlist e si chiamano
+  `1 - Titolo.mp4`, `2 - Titolo.mp4`… (senza il nome della playlist nel nome del file).
 - Copertina e metadati incorporati nei file.
 - Coda con avanzamento in tempo reale e pulsante **Annulla**.
 - **Si prepara da solo**: al primo avvio scarica yt-dlp, ffmpeg e Deno
   (il runtime JavaScript che yt-dlp richiede per YouTube); a ogni avvio
   controlla se esiste un yt-dlp più recente e lo aggiorna.
-- **Si aggiorna da solo**: a ogni avvio guarda l'ultima release GitHub di
-  questo repository e, se è più recente, installa la nuova versione.
+- **Si aggiorna da solo**: a ogni avvio, subito (senza aspettare il resto), guarda l'ultima
+  release GitHub e, se è più recente, la scarica, sostituisce l'app e la riavvia.
+  In fondo alla finestra una riga dice sempre com'è andato il controllo.
+  Su Linux funziona dall'AppImage; si può disattivare nelle opzioni avanzate.
 
 ### Come funziona Spotify
 
@@ -51,8 +55,9 @@ Le versioni per Windows, Linux e macOS si compilano **su GitHub**, in automatico
 ### Preparazione (una volta sola)
 
 1. Crea un repository su GitHub e caricaci il progetto (compresa la cartella `.github`).
-2. In `Cargo.toml` sostituisci `OWNER` nella riga `repository` con il tuo nome
-   utente GitHub: da lì le app installate sanno dove cercare gli aggiornamenti.
+2. Non serve modificare `Cargo.toml`: le versioni compilate da GitHub cercano gli
+   aggiornamenti nel repository stesso da cui sono state compilate. (Solo se compili in
+   locale, imposta `repository` in `Cargo.toml` con il tuo indirizzo GitHub.)
 3. Su GitHub: *Settings → Actions → General → Workflow permissions* e scegli
    **Read and write permissions** (serve per creare tag e release).
 
@@ -138,6 +143,14 @@ GRABBIT_YTDLP=/percorso/yt-dlp cargo test -- --ignored
 | `src/config.rs` | impostazioni salvate |
 
 ## Problemi comuni
+
+- **L'aggiornamento automatico non parte**: leggi la riga di stato in fondo alla finestra.
+  Dice se Grabbit è già aggiornato, se non c'è nessuna release (o il repository è privato:
+  l'app non può leggerlo, serve un repository pubblico), se GitHub ha limitato le richieste,
+  o se la release non contiene il file per il tuo sistema. Il pulsante *Controlla
+  aggiornamenti di Grabbit* nelle opzioni avanzate rifà il controllo subito. Dopo un
+  aggiornamento l'app si riavvia una volta sola e non si aggiorna di nuovo in quella
+  esecuzione, per evitare cicli.
 
 - **«Sign in to confirm you're not a bot» / video con restrizioni**: in
   *Opzioni avanzate* scegli il browser da cui prendere i cookie.

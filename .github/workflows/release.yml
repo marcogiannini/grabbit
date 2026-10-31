@@ -24,6 +24,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # il repository da cui si compila diventa quello in cui l'app cerca gli aggiornamenti:
+  # non serve più sostituire OWNER in Cargo.toml
+  GRABBIT_REPO: ${{ github.repository }}
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false

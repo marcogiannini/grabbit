@@ -8,7 +8,7 @@ use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub enum Event {
     Log(String),
@@ -128,7 +128,7 @@ pub fn run(
     }
 
     // 2) esegue i lavori uno alla volta
-    for job in jobs {
+    for mut job in jobs {
         if cancel.load(Ordering::Relaxed) {
             emit(Event::JobFinished {
                 id: job.id,
@@ -136,6 +136,19 @@ pub fn run(
                 detail: "Annullato".into(),
             });
             continue;
+        }
+        // link che può essere una playlist: cartella con il nome della playlist
+        if job.out_name.is_none() && job.subdir.is_none() && !looks_like_single_video(&job.target) {
+            emit(Event::Log("Controllo se il link è una playlist…".into()));
+            if let Some(title) = probe_playlist_title(&job, &cfg, &tools, &cancel) {
+                let folder = sanitize(&title);
+                if !folder.is_empty() {
+                    emit(Event::Log(format!(
+                        "Playlist «{title}»: salvo i file nella cartella «{folder}»"
+                    )));
+                    job.subdir = Some(folder);
+                }
+            }
         }
         let (ok, detail) = run_job(&job, &cfg, &tools, &emit, &cancel);
         emit(Event::JobFinished {
@@ -145,6 +158,91 @@ pub fn run(
         });
     }
     emit(Event::Finished);
+}
+
+/// Link a un singolo video di YouTube, senza playlist: inutile cercare il titolo di una playlist.
+fn looks_like_single_video(url: &str) -> bool {
+    let u = url.trim().to_lowercase();
+    if u.contains("list=") {
+        return false;
+    }
+    u.contains("youtube.com/watch?")
+        || u.contains("youtu.be/")
+        || u.contains("youtube.com/shorts/")
+        || u.contains("youtube.com/live/")
+}
+
+/// Chiede a yt-dlp il titolo della playlist a cui appartiene il link.
+/// `None` se il link non è una playlist, o se la richiesta non riesce o va in timeout:
+/// in quel caso i file vanno semplicemente nella cartella scelta.
+fn probe_playlist_title(
+    job: &Job,
+    cfg: &Config,
+    tools: &Toolset,
+    cancel: &AtomicBool,
+) -> Option<String> {
+    let mut a: Vec<String> = Vec::new();
+    add(
+        &mut a,
+        &[
+            "--flat-playlist",
+            "--playlist-items",
+            "1",
+            "--skip-download",
+            "--no-warnings",
+            "--ignore-errors",
+            "--print",
+            "%(playlist_title|)s",
+        ],
+    );
+    // stessa scelta del download vero: con "--no-playlist" un link video+lista è un solo video
+    a.push(
+        if cfg.playlist {
+            "--yes-playlist"
+        } else {
+            "--no-playlist"
+        }
+        .into(),
+    );
+    if let Some(d) = &tools.deno {
+        add(
+            &mut a,
+            &["--js-runtimes", &format!("deno:{}", d.to_string_lossy())],
+        );
+    }
+    if !cfg.cookies_browser.is_empty() {
+        add(&mut a, &["--cookies-from-browser", &cfg.cookies_browser]);
+    }
+    a.push("--".into());
+    a.push(job.target.clone());
+
+    let mut child = tools::command(&tools.ytdlp)
+        .args(&a)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if cancel.load(Ordering::Relaxed) || started.elapsed() > Duration::from_secs(60) {
+            terminate(&mut child);
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    out.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(String::from)
 }
 
 fn add(a: &mut Vec<String>, items: &[&str]) {
@@ -186,8 +284,11 @@ fn build_args(job: &Job, cfg: &Config, tools: &Toolset) -> Vec<String> {
     a.push("-o".into());
     a.push(match &job.out_name {
         Some(n) => format!("{n}.%(ext)s"),
-        // sottocartella e numero d'ordine solo quando è una playlist
-        None => "%(playlist_title&{}/|)s%(playlist_index&{} - |)s%(title).150B.%(ext)s".into(),
+        // Solo numero d'ordine (se è una playlist) e titolo. La cartella della playlist NON
+        // si fa con il modello: yt-dlp trasforma ogni "/" dentro un valore in un carattere
+        // innocuo, quindi finirebbe tutto nel nome del file. La sceglie Grabbit (vedi
+        // `probe_playlist_title`) e la passa a -P.
+        None => "%(playlist_index&{} - |)s%(title).150B.%(ext)s".into(),
     });
 
     if cfg.playlist && job.out_name.is_none() {
@@ -550,6 +651,111 @@ mod tests {
             &toolset(),
         );
         assert!(a.contains(&"--yes-playlist".to_string()));
+    }
+
+    #[test]
+    fn playlist_template_has_no_playlist_name_and_folder_goes_in_path() {
+        let cfg = Config {
+            out_dir: "/D".into(),
+            playlist: true,
+            ..Config::default()
+        };
+        let mut j = job("https://www.youtube.com/playlist?list=PL1", None, false);
+        let a = build_args(&j, &cfg, &toolset());
+        let o = a.iter().position(|x| x == "-o").unwrap();
+        assert_eq!(a[o + 1], "%(playlist_index&{} - |)s%(title).150B.%(ext)s");
+        assert!(!a[o + 1].contains("playlist_title") && !a[o + 1].contains('/'));
+        let p = a.iter().position(|x| x == "-P").unwrap();
+        assert_eq!(a[p + 1], "/D");
+        j.subdir = Some("La mia playlist".into());
+        let a = build_args(&j, &cfg, &toolset());
+        let p = a.iter().position(|x| x == "-P").unwrap();
+        assert_eq!(
+            PathBuf::from(&a[p + 1]),
+            PathBuf::from("/D").join("La mia playlist")
+        );
+    }
+
+    #[test]
+    fn single_video_links_skip_the_playlist_probe() {
+        for u in [
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "https://youtu.be/dQw4w9WgXcQ?t=10",
+            "https://www.youtube.com/shorts/abc123",
+        ] {
+            assert!(looks_like_single_video(u), "{u}");
+        }
+        for u in [
+            "https://www.youtube.com/playlist?list=PL123",
+            "https://www.youtube.com/watch?v=abc&list=PL123",
+            "https://www.youtube.com/@canale/videos",
+            "https://soundcloud.com/utente/sets/album",
+        ] {
+            assert!(!looks_like_single_video(u), "{u}");
+        }
+    }
+
+    /// Playlist vera (feed RSS locale) con yt-dlp reale: cartella con il nome della playlist,
+    /// file senza il nome della playlist.
+    /// GRABBIT_YTDLP=... GRABBIT_PLAYLIST_URL=http://127.0.0.1:8768/feed.rss GRABBIT_PLAYLIST_TITLE="Mix: Best/Of 2026" \
+    ///   cargo test e2e_playlist -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn e2e_playlist_folder() {
+        let (Ok(bin), Ok(url), Ok(title)) = (
+            std::env::var("GRABBIT_YTDLP"),
+            std::env::var("GRABBIT_PLAYLIST_URL"),
+            std::env::var("GRABBIT_PLAYLIST_TITLE"),
+        ) else {
+            return;
+        };
+        let out = std::env::temp_dir().join("grabbit-e2e-playlist");
+        let _ = std::fs::remove_dir_all(&out);
+        let cfg = Config {
+            mode: Mode::Video,
+            out_dir: out.clone(),
+            playlist: true,
+            embed_meta: false,
+            ..Config::default()
+        };
+        let tools = Toolset {
+            ytdlp: bin.into(),
+            ffmpeg_dir: None,
+            deno: None,
+        };
+        let emit: Emit = Arc::new(|e| {
+            if let Event::Log(l) = e {
+                println!("log: {l}");
+            }
+        });
+        run(
+            vec![url],
+            cfg,
+            tools,
+            0,
+            emit,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let folder = out.join(sanitize(&title));
+        let mut names: Vec<String> = std::fs::read_dir(&folder)
+            .unwrap_or_else(|e| panic!("cartella {folder:?} non creata: {e}"))
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        println!("{names:?}");
+        assert_eq!(names.len(), 2);
+        for n in &names {
+            assert!(
+                !n.contains("Mix") && !n.contains("Best"),
+                "il nome della playlist è nel file: {n}"
+            );
+        }
+        assert!(
+            names[0].starts_with("1 - ") && names[1].starts_with("2 - "),
+            "{names:?}"
+        );
+        // niente file fuori dalla cartella
+        assert_eq!(out.read_dir().unwrap().count(), 1);
     }
 
     /// Verifica che un vero yt-dlp accetti tutte le combinazioni di opzioni.

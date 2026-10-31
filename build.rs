@@ -2,6 +2,7 @@
 // Su Linux/macOS non fa nulla.
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-env-changed=GRABBIT_REPO");
     #[cfg(windows)]
     {
         let mut res = winresource::WindowsResource::new();
