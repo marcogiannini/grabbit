@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Grabbit
+GenericName=Scarica video e musica
+Comment=Scarica video e musica da YouTube e Spotify
+Exec=grabbit
+Icon=grabbit
+Terminal=false
+Categories=AudioVideo;Network;
+Keywords=youtube;spotify;download;video;musica;yt-dlp;
+StartupWMClass=grabbit

@@ -1,0 +1,126 @@
+name: Release
+
+# Per pubblicare una nuova versione:
+#   1. alza `version` in Cargo.toml (es. 0.2.0) e fai commit
+#   2. git tag v0.2.0 && git push --tags
+# La CI compila Windows, Linux (AppImage) e macOS e pubblica la release.
+# Le app già installate la trovano da sole e si aggiornano.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Il tag deve coincidere con la versione di Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} diverso da Cargo.toml (v$V)"; exit 1
+          fi
+
+  windows:
+    needs: check-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Rinomina l'eseguibile
+        shell: bash
+        run: cp target/release/grabbit.exe grabbit-windows-x86_64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: grabbit-windows-x86_64.exe
+
+  linux:
+    needs: check-version
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-22.04, arch: x86_64 }     # glibc vecchia = massima compatibilità
+          - { runner: ubuntu-22.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Costruisci l'AppImage
+        run: ARCH=${{ matrix.arch }} packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: target/appimage/grabbit-linux-${{ matrix.arch }}.AppImage
+
+  macos:
+    needs: check-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Compila per Apple Silicon e Intel
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+      - name: Crea i file della release
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          mkdir -p dist
+          for pair in "aarch64:aarch64-apple-darwin" "x86_64:x86_64-apple-darwin"; do
+            ARCH=${pair%%:*}; TARGET=${pair##*:}
+            BIN=target/$TARGET/release/grabbit
+            # binario nudo: usato dall'aggiornamento automatico
+            cp "$BIN" "dist/grabbit-macos-$ARCH"
+            # bundle .app: per la prima installazione
+            APP="Grabbit.app"; rm -rf "$APP"
+            mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+            cp "$BIN" "$APP/Contents/MacOS/grabbit"
+            cp assets/icon.icns "$APP/Contents/Resources/icon.icns"
+            cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Grabbit</string>
+            <key>CFBundleDisplayName</key><string>Grabbit</string>
+            <key>CFBundleIdentifier</key><string>org.grabbit.Grabbit</string>
+            <key>CFBundleExecutable</key><string>grabbit</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+            codesign --force --deep --sign - "$APP"   # firma ad-hoc
+            ditto -c -k --keepParent "$APP" "dist/Grabbit-macos-$ARCH.app.zip"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
