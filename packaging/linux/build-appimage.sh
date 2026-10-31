@@ -3,7 +3,7 @@
 # Uso:  packaging/linux/build-appimage.sh
 set -euo pipefail
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 ARCH="${ARCH:-$(uname -m)}"            # x86_64 | aarch64
 OUT="target/appimage"
 APPDIR="$OUT/Grabbit.AppDir"

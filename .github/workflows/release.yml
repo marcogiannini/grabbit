@@ -1,36 +1,96 @@
 name: Release
 
-# Per pubblicare una nuova versione:
-#   1. alza `version` in Cargo.toml (es. 0.2.0) e fai commit
-#   2. git tag v0.2.0 && git push --tags
-# La CI compila Windows, Linux (AppImage) e macOS e pubblica la release.
-# Le app già installate la trovano da sole e si aggiornano.
+# Compila Grabbit per Windows, Linux (AppImage) e macOS e, se richiesto,
+# pubblica una release GitHub con tutti i file.
+#
+# Tre modi per usarlo (dettagli nel README, sezione "Creare una release"):
+#
+#  1. DA PULSANTE (consigliato): Actions -> Release -> Run workflow, scrivi la
+#     nuova versione (es. 0.2.0). Il workflow aggiorna Cargo.toml, crea il tag
+#     v0.2.0, compila tutto e pubblica la release.
+#  2. DA TAG: alza `version` in Cargo.toml, poi `git tag v0.2.0 && git push --tags`.
+#  3. SOLO PROVA: Run workflow lasciando vuoto il campo versione. Compila tutto e
+#     lascia i file in "Artifacts" senza pubblicare nulla.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Nuova versione da pubblicare, es. 0.2.0 (vuoto = solo compilare, senza pubblicare)"
+        required: false
+        type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  check-version:
-    runs-on: ubuntu-latest
+  # ───────────── 1. decide versione e tag ─────────────
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      ref: ${{ steps.meta.outputs.ref }}
+      version: ${{ steps.meta.outputs.version }}
+      publish: ${{ steps.meta.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
-      - name: Il tag deve coincidere con la versione di Cargo.toml
-        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          fetch-depth: 0 # serve per vedere i tag già esistenti
+      - id: meta
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          if [ "v$V" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} diverso da Cargo.toml (v$V)"; exit 1
+          set -euo pipefail
+          CARGO_V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            # avviato da un tag: deve coincidere con Cargo.toml
+            if [[ "$GITHUB_REF_NAME" != "v$CARGO_V" ]]; then
+              echo "::error::Il tag $GITHUB_REF_NAME non coincide con la versione in Cargo.toml (v$CARGO_V). Alza la versione e ricrea il tag."
+              exit 1
+            fi
+            { echo "ref=$GITHUB_REF_NAME"; echo "version=$CARGO_V"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+
+          elif [[ -n "${INPUT_VERSION// /}" ]]; then
+            # avviato da pulsante con una versione: bump + commit + tag
+            V="${INPUT_VERSION// /}"; V="${V#v}"
+            if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Versione '$INPUT_VERSION' non valida: usa il formato 1.2.3"
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+              echo "::error::Esiste già il tag v$V. Scegli una versione più alta."
+              exit 1
+            fi
+            # sostituisce solo la PRIMA riga `version = "..."` (quella del pacchetto)
+            sed -i "0,/^version = \".*\"/s//version = \"$V\"/" Cargo.toml
+            cargo update --workspace
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git diff --cached --quiet || git commit -m "Versione $V"
+            git tag "v$V"
+            git push origin "HEAD:$GITHUB_REF_NAME" "v$V"
+            { echo "ref=v$V"; echo "version=$V"; echo "publish=true"; } >> "$GITHUB_OUTPUT"
+
+          else
+            # avviato da pulsante senza versione: solo compilazione di prova
+            { echo "ref=$GITHUB_SHA"; echo "version=$CARGO_V"; echo "publish=false"; } >> "$GITHUB_OUTPUT"
           fi
 
+  # ───────────── 2. compilazione ─────────────
   windows:
-    needs: check-version
+    needs: prepare
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
@@ -43,29 +103,50 @@ jobs:
           path: grabbit-windows-x86_64.exe
 
   linux:
-    needs: check-version
-    strategy:
-      matrix:
-        include:
-          - { runner: ubuntu-22.04, arch: x86_64 }     # glibc vecchia = massima compatibilità
-          - { runner: ubuntu-22.04-arm, arch: aarch64 }
-    runs-on: ${{ matrix.runner }}
+    needs: prepare
+    runs-on: ubuntu-22.04 # glibc "vecchia" = l'AppImage gira anche su distro non recenti
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # "bash" davanti allo script: caricando da zip o da Windows il file perde il
+      # permesso di esecuzione e GitHub darebbe "exit code 126".
+      - name: Costruisci l'AppImage
+        run: ARCH=x86_64 bash packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: target/appimage/grabbit-linux-x86_64.AppImage
+
+  # Linux ARM (es. Raspberry Pi): facoltativo. I runner ARM gratuiti esistono solo
+  # per repository pubblici; se manca o fallisce, la release esce comunque.
+  linux-arm:
+    needs: prepare
+    if: ${{ github.event.repository.private == false }}
+    continue-on-error: true
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Costruisci l'AppImage
-        run: ARCH=${{ matrix.arch }} packaging/linux/build-appimage.sh
+        run: ARCH=aarch64 bash packaging/linux/build-appimage.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}
-          path: target/appimage/grabbit-linux-${{ matrix.arch }}.AppImage
+          name: linux-aarch64
+          path: target/appimage/grabbit-linux-aarch64.AppImage
 
   macos:
-    needs: check-version
+    needs: prepare
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -81,9 +162,11 @@ jobs:
           for pair in "aarch64:aarch64-apple-darwin" "x86_64:x86_64-apple-darwin"; do
             ARCH=${pair%%:*}; TARGET=${pair##*:}
             BIN=target/$TARGET/release/grabbit
-            # binario nudo: usato dall'aggiornamento automatico
+            # binario nudo: lo scarica l'aggiornamento automatico
             cp "$BIN" "dist/grabbit-macos-$ARCH"
-            # bundle .app: per la prima installazione
+            # pacchetto .app: per la prima installazione.
+            # NON si firma il pacchetto: l'aggiornamento automatico sostituisce il
+            # binario e invaliderebbe la firma (macOS poi terminerebbe l'app).
             APP="Grabbit.app"; rm -rf "$APP"
             mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
             cp "$BIN" "$APP/Contents/MacOS/grabbit"
@@ -103,7 +186,6 @@ jobs:
             <key>NSHighResolutionCapable</key><true/>
           </dict></plist>
           PLIST
-            codesign --force --deep --sign - "$APP"   # firma ad-hoc
             ditto -c -k --keepParent "$APP" "dist/Grabbit-macos-$ARCH.app.zip"
           done
       - uses: actions/upload-artifact@v4
@@ -111,16 +193,23 @@ jobs:
           name: macos
           path: dist/*
 
+  # ───────────── 3. pubblicazione ─────────────
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, macos]
+    needs: [prepare, windows, linux, linux-arm, macos]
+    # parte solo se Windows, Linux e macOS sono riusciti (Linux ARM è facoltativo)
+    if: ${{ always() && needs.prepare.outputs.publish == 'true' && needs.windows.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: release
           merge-multiple: true
+      - name: Elenco dei file
+        run: ls -la release
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.ref }}
+          name: Grabbit ${{ needs.prepare.outputs.version }}
           files: release/*
+          fail_on_unmatched_files: true
           generate_release_notes: true

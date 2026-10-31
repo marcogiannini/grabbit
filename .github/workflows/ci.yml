@@ -1,0 +1,30 @@
+name: CI
+
+# Controlla ad ogni push e pull request che il programma compili e che i test
+# passino su Linux, Windows e macOS: gli errori specifici di un sistema
+# emergono subito, non il giorno della release.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Formattazione
+        if: matrix.os == 'ubuntu-22.04'
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets
+      - name: Test
+        run: cargo test

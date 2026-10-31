@@ -37,40 +37,77 @@ Spotify cifra l'audio (DRM) e yt-dlp non lo scarica. Grabbit legge soltanto i
 |---|---|---|
 | Windows | `grabbit-windows-x86_64.exe` | doppio clic; SmartScreen può avvisare perché l'eseguibile non è firmato |
 | Linux | `grabbit-linux-x86_64.AppImage` | `chmod +x` e doppio clic (l'auto-aggiornamento funziona solo da AppImage) |
-| macOS | `Grabbit-macos-aarch64.app.zip` (Apple Silicon) oppure `…-x86_64.app.zip` (Intel) | la prima volta: tasto destro → Apri, perché l'app non è notarizzata |
+| macOS | `Grabbit-macos-aarch64.app.zip` (Apple Silicon) oppure `…-x86_64.app.zip` (Intel) | decomprimi, trascina in *Applicazioni*; la prima volta tasto destro → Apri (l'app non è notarizzata). Se macOS la dichiara «danneggiata»: `xattr -cr /Applications/Grabbit.app` |
 
 Dati e strumenti scaricati stanno in:
 Windows `%APPDATA%\Grabbit\Grabbit\data`, Linux `~/.local/share/grabbit`,
 macOS `~/Library/Application Support/org.Grabbit.Grabbit`.
 
-## Pubblicare una nuova versione (e farla arrivare agli utenti)
+## Creare una release
 
-1. In `Cargo.toml` imposta `repository = "https://github.com/TUO-UTENTE/grabbit"`
-   (una volta sola: da qui l'app sa dove cercare gli aggiornamenti).
-2. Per ogni release: alza `version` in `Cargo.toml` (es. `0.2.0`), fai commit, poi
-   ```bash
-   git tag v0.2.0
-   git push --tags
-   ```
-3. La GitHub Action `.github/workflows/release.yml` compila tutto e allega alla
-   release questi file, **con esattamente questi nomi** (li cerca l'updater):
+Le versioni per Windows, Linux e macOS si compilano **su GitHub**, in automatico
+(`.github/workflows/release.yml`). Non serve nessun programma installato sul tuo PC.
 
-   - `grabbit-windows-x86_64.exe`
-   - `grabbit-linux-x86_64.AppImage` (e `-aarch64`)
-   - `grabbit-macos-aarch64` e `grabbit-macos-x86_64` (binari nudi, per l'aggiornamento)
-   - `Grabbit-macos-*.app.zip` (per la prima installazione su Mac)
+### Preparazione (una volta sola)
 
-4. Al successivo avvio le app installate trovano la release e si aggiornano
-   (nelle opzioni avanzate si può scegliere tra aggiornamento automatico e a conferma).
+1. Crea un repository su GitHub e caricaci il progetto (compresa la cartella `.github`).
+2. In `Cargo.toml` sostituisci `OWNER` nella riga `repository` con il tuo nome
+   utente GitHub: da lì le app installate sanno dove cercare gli aggiornamenti.
+3. Su GitHub: *Settings → Actions → General → Workflow permissions* e scegli
+   **Read and write permissions** (serve per creare tag e release).
 
-Il tag deve coincidere con la versione in `Cargo.toml`: la CI lo verifica.
+### Ogni volta che vuoi pubblicare una versione
 
-## Ottenere l'eseguibile Windows
+1. Su GitHub apri la scheda **Actions** → a sinistra **Release** → **Run workflow**.
+2. Nel campo *Nuova versione* scrivi il numero, per esempio `0.2.0`, e conferma.
+3. Aspetta 10-20 minuti. Il workflow, da solo:
+   - aggiorna la versione in `Cargo.toml`/`Cargo.lock` e crea il tag `v0.2.0`;
+   - compila Windows, Linux e macOS (Intel e Apple Silicon);
+   - pubblica la release nella pagina **Releases** con tutti i file.
+4. Le app già installate trovano la nuova release al prossimo avvio e si aggiornano.
 
-- **Senza installare nulla**: su GitHub vai in *Actions → Windows exe → Run workflow*;
-  dopo qualche minuto scarichi `grabbit-windows` da *Artifacts*.
-- **Sul tuo PC Windows**: installa Rust da <https://rustup.rs> e fai doppio clic su
-  `packaging\windows\build.bat` (crea `grabbit-windows-x86_64.exe`).
+I numeri seguono il formato `maggiore.minore.patch`: `0.1.0` → `0.1.1` per una
+correzione, `0.2.0` per una novità, `1.0.0` per la prima versione stabile.
+Una versione già usata non si può ripubblicare: scegline una più alta.
+
+**Alternative**
+
+- *Da terminale*: alza `version` in `Cargo.toml`, fai commit, poi
+  `git tag v0.2.0 && git push --tags`. Parte lo stesso workflow
+  (il tag deve coincidere con la versione di `Cargo.toml`, altrimenti si ferma).
+- *Solo prova*: *Run workflow* lasciando **vuoto** il campo versione. Compila tutto
+  e lascia i file in *Artifacts* a fondo pagina, senza pubblicare nulla.
+
+### File prodotti (nomi da non cambiare: li cerca l'aggiornamento automatico)
+
+| File | A cosa serve |
+|---|---|
+| `grabbit-windows-x86_64.exe` | Windows |
+| `grabbit-linux-x86_64.AppImage` | Linux Intel/AMD |
+| `grabbit-linux-aarch64.AppImage` | Linux ARM (solo se il repository è pubblico) |
+| `Grabbit-macos-aarch64.app.zip` / `Grabbit-macos-x86_64.app.zip` | macOS, prima installazione |
+| `grabbit-macos-aarch64` / `grabbit-macos-x86_64` | macOS, usati dall'aggiornamento automatico |
+
+### Se qualcosa va storto
+
+- **«Permission denied» o «protected branch»** nel passo *prepare*: i permessi del
+  punto 3 della preparazione mancano, oppure il ramo `main` è protetto e non accetta
+  commit dal workflow. In quel caso alza la versione a mano e usa il metodo del tag.
+- **«Process completed with exit code 126»**: un file di script ha perso il permesso
+  di esecuzione nel caricamento (zip/Windows). Il workflow lancia già gli script con
+  `bash`, quindi basta usare l'ultima versione dei file.
+- **Avvisi «Node.js 20 is deprecated»**: sono solo avvisi di GitHub, non errori.
+- **Una build fallisce**: apri il lavoro rosso, leggi l'errore (di solito è nelle
+  ultime righe) e correggi il codice. La release non viene pubblicata a metà: esce solo
+  se Windows, Linux e macOS riescono. Dopo la correzione, rilancia con una versione nuova
+  (se il workflow ha già creato il tag, cancellalo da *Code → Tags* o usa il numero successivo).
+- Il workflow **CI** gira a ogni push e controlla formattazione, avvisi e test su
+  tutti e tre i sistemi, così gli errori si vedono prima della release.
+
+## Compilare in locale su Windows
+
+Con Rust installato (<https://rustup.rs>) fai doppio clic su `packaging\windows\build.bat`:
+crea `grabbit-windows-x86_64.exe`.
 
 ## Compilare da sorgente
 
