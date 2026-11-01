@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Su Windows (release) niente finestra console dietro all'interfaccia.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod config;
 mod downloader;
+mod i18n;
 mod net;
 mod selfupdate;
 mod spotify;

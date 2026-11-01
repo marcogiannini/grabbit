@@ -1,6 +1,8 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Esecuzione dei download: costruisce la riga di comando di yt-dlp, legge
 //! l'output in tempo reale e lo traduce in eventi per l'interfaccia.
 use crate::config::{Config, Mode};
+use crate::tr;
 use crate::{spotify, tools};
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -67,13 +69,23 @@ pub fn run(
     let mut next = id_base;
     for line in inputs {
         if spotify::is_spotify(&line) {
-            emit(Event::Log(format!("Leggo il link Spotify: {line}")));
+            emit(Event::Log(tr!(
+                format!("Leggo il link Spotify: {line}"),
+                format!("Reading Spotify link: {line}")
+            )));
             match spotify::fetch(&line) {
                 Ok(col) => {
-                    emit(Event::Log(format!(
-                        "«{}»: {} brani trovati. L'audio viene cercato su YouTube.",
-                        col.name,
-                        col.tracks.len()
+                    emit(Event::Log(tr!(
+                        format!(
+                            "«{}»: {} brani trovati. L'audio viene cercato su YouTube.",
+                            col.name,
+                            col.tracks.len()
+                        ),
+                        format!(
+                            "“{}”: {} tracks found. The audio is searched on YouTube.",
+                            col.name,
+                            col.tracks.len()
+                        )
                     )));
                     let multi = col.tracks.len() > 1;
                     for t in col.tracks {
@@ -133,18 +145,25 @@ pub fn run(
             emit(Event::JobFinished {
                 id: job.id,
                 ok: false,
-                detail: "Annullato".into(),
+                detail: tr!("Annullato", "Cancelled").into(),
             });
             continue;
         }
         // link che può essere una playlist: cartella con il nome della playlist
         if job.out_name.is_none() && job.subdir.is_none() && !looks_like_single_video(&job.target) {
-            emit(Event::Log("Controllo se il link è una playlist…".into()));
+            emit(Event::Log(
+                tr!(
+                    "Controllo se il link è una playlist…",
+                    "Checking whether the link is a playlist…"
+                )
+                .into(),
+            ));
             if let Some(title) = probe_playlist_title(&job, &cfg, &tools, &cancel) {
                 let folder = sanitize(&title);
                 if !folder.is_empty() {
-                    emit(Event::Log(format!(
-                        "Playlist «{title}»: salvo i file nella cartella «{folder}»"
+                    emit(Event::Log(tr!(
+                        format!("Playlist «{title}»: salvo i file nella cartella «{folder}»"),
+                        format!("Playlist “{title}”: saving the files in the folder “{folder}”")
                     )));
                     job.subdir = Some(folder);
                 }
@@ -438,7 +457,15 @@ fn run_job(
         .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return (false, format!("impossibile avviare yt-dlp: {e}")),
+        Err(e) => {
+            return (
+                false,
+                tr!(
+                    format!("impossibile avviare yt-dlp: {e}"),
+                    format!("could not start yt-dlp: {e}")
+                ),
+            )
+        }
     };
 
     let (tx, rx) = mpsc::channel::<(bool, String)>();
@@ -472,7 +499,10 @@ fn run_job(
         if let Some(rest) = line.strip_prefix("GRBFILE|") {
             files += 1;
             last_file = rest.to_string();
-            emit(Event::Log(format!("Salvato: {rest}")));
+            emit(Event::Log(tr!(
+                format!("Salvato: {rest}"),
+                format!("Saved: {rest}")
+            )));
         } else if line.starts_with("GRB|") {
             let f: Vec<&str> = line.splitn(9, '|').collect();
             let get = |i: usize| f.get(i).copied().filter(|s| *s != "NA" && *s != "None");
@@ -491,7 +521,10 @@ fn run_job(
                 parts.push(fmt_speed(s));
             }
             if let Some(e) = num(get(5)) {
-                parts.push(format!("ancora {}", fmt_eta(e)));
+                parts.push(tr!(
+                    format!("ancora {}", fmt_eta(e)),
+                    format!("{} left", fmt_eta(e))
+                ));
             }
             if let Some(title) = get(8) {
                 if job.out_name.is_none() && (!title_seen || get(6).is_some()) {
@@ -529,7 +562,7 @@ fn run_job(
 
     let status = child.wait();
     if cancelled {
-        return (false, "Annullato".into());
+        return (false, tr!("Annullato", "Cancelled").into());
     }
     let success = status.map(|s| s.success()).unwrap_or(false);
     match (success, files) {
@@ -539,9 +572,9 @@ fn run_job(
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let note = if success {
-                "Completato"
+                tr!("Completato", "Completed")
             } else {
-                "Completato in parte"
+                tr!("Completato in parte", "Partially completed")
             };
             (
                 true,
@@ -554,7 +587,13 @@ fn run_job(
         }
         _ => (
             false,
-            last_error.unwrap_or_else(|| "download non riuscito (vedi il registro)".into()),
+            last_error.unwrap_or_else(|| {
+                tr!(
+                    "download non riuscito (vedi il registro)",
+                    "download failed (see the log)"
+                )
+                .into()
+            }),
         ),
     }
 }
@@ -856,7 +895,8 @@ mod tests {
         println!("{}", ev.join("\n"));
         if cancel_after.is_some() {
             assert!(
-                ev.iter().any(|e| e == "finished: false Annullato"),
+                ev.iter()
+                    .any(|e| *e == format!("finished: false {}", tr!("Annullato", "Cancelled"))),
                 "annullamento non riconosciuto"
             );
             return;

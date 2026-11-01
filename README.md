@@ -1,164 +1,171 @@
 # Grabbit
 
-Scarica **video** e **musica** da YouTube e Spotify con un'interfaccia semplice.
-Scritto in Rust (leggero: l'AppImage pesa circa 4 MB), si appoggia a
-[yt-dlp](https://github.com/yt-dlp/yt-dlp) e funziona su Windows, Linux e macOS.
+**English** · [Italiano](README.it.md)
 
-## Cosa fa
+Download **video** and **music** from YouTube and Spotify with a simple interface.
+Written in Rust (lightweight: the AppImage is about 4 MB), it relies on
+[yt-dlp](https://github.com/yt-dlp/yt-dlp) and runs on Windows, Linux and macOS.
+The interface is in Italian if your system language is Italian, and in English otherwise.
 
-- **Video**: MP4 / MKV / WebM, qualità massima a scelta (fino a 4K).
-- **Audio**: MP3, M4A (AAC), Opus, OGG Vorbis, FLAC, WAV, con scelta del **bitrate**.
-- Cartella di destinazione a scelta, più link in un colpo solo (uno per riga).
-- **Playlist**: i file vanno in una cartella con il nome della playlist e si chiamano
-  `1 - Titolo.mp4`, `2 - Titolo.mp4`… (senza il nome della playlist nel nome del file).
-- Copertina e metadati incorporati nei file.
-- Coda con avanzamento in tempo reale e pulsante **Annulla**.
-- **Si prepara da solo**: al primo avvio scarica yt-dlp, ffmpeg e Deno
-  (il runtime JavaScript che yt-dlp richiede per YouTube); a ogni avvio
-  controlla se esiste un yt-dlp più recente e lo aggiorna.
-- **Si aggiorna da solo**: a ogni avvio, subito (senza aspettare il resto), guarda l'ultima
-  release GitHub e, se è più recente, la scarica, sostituisce l'app e la riavvia.
-  In fondo alla finestra una riga dice sempre com'è andato il controllo.
-  Su Linux funziona dall'AppImage; si può disattivare nelle opzioni avanzate.
+## What it does
 
-### Come funziona Spotify
+- **Video**: MP4 / MKV / WebM, maximum quality of your choice (up to 4K).
+- **Audio**: MP3, M4A (AAC), Opus, OGG Vorbis, FLAC, WAV, with a **bitrate** choice.
+- Choose the destination folder; paste several links at once (one per line).
+- **Playlists**: files go into a folder named after the playlist and are called
+  `1 - Title.mp4`, `2 - Title.mp4`… (the playlist name is not part of the file name).
+- Cover art and metadata embedded in the files.
+- Queue with live progress and a **Cancel** button.
+- **Sets itself up**: on first launch it downloads yt-dlp, ffmpeg and Deno
+  (the JavaScript runtime yt-dlp needs for YouTube); on every launch it checks
+  whether a newer yt-dlp exists and updates it.
+- **Updates itself**: on every launch, right away (without waiting for the rest), it looks at the
+  latest GitHub release and, if it is newer, downloads it, replaces the app and restarts it.
+  A line at the bottom of the window always tells you how the check went.
+  On Linux it works from the AppImage; it can be turned off in the advanced options.
 
-Spotify cifra l'audio (DRM) e yt-dlp non lo scarica. Grabbit legge soltanto i
-**dati pubblici** del link (titolo e artista di brano, album o playlist), poi
-**cerca lo stesso brano su YouTube** e scarica l'audio da lì. Quindi:
+### How Spotify works
 
-- il risultato è l'audio della versione YouTube, non il file originale Spotify;
-- una playlist può mostrare al massimo circa 100 brani;
-- se Spotify cambia la struttura delle sue pagine pubbliche, la lettura dei link
-  può smettere di funzionare finché non si aggiorna Grabbit.
+Spotify encrypts its audio (DRM) and yt-dlp cannot download it. Grabbit only reads the
+**public data** of the link (title and artist of a track, album or playlist), then
+**searches for the same track on YouTube** and downloads the audio from there. So:
 
-> Usa Grabbit solo per contenuti che hai il diritto di scaricare e nel rispetto
-> del copyright e dei termini di servizio delle piattaforme.
+- the result is the audio of the YouTube version, not the original Spotify file;
+- a playlist can show at most about 100 tracks;
+- if Spotify changes the structure of its public pages, reading links may stop
+  working until Grabbit is updated.
 
-## Installazione
+> Use Grabbit only for content you have the right to download and in compliance with
+> the copyright and terms of service of the platforms.
 
-| Sistema | File dalla pagina *Releases* | Note |
+## Installation
+
+| System | File from the *Releases* page | Notes |
 |---|---|---|
-| Windows | `grabbit-windows-x86_64.exe` | doppio clic; SmartScreen può avvisare perché l'eseguibile non è firmato |
-| Linux | `grabbit-linux-x86_64.AppImage` | `chmod +x` e doppio clic (l'auto-aggiornamento funziona solo da AppImage) |
-| macOS | `Grabbit-macos-aarch64.app.zip` (Apple Silicon) oppure `…-x86_64.app.zip` (Intel) | decomprimi, trascina in *Applicazioni*; la prima volta tasto destro → Apri (l'app non è notarizzata). Se macOS la dichiara «danneggiata»: `xattr -cr /Applications/Grabbit.app` |
+| Windows | `grabbit-windows-x86_64.exe` | double-click; SmartScreen may warn because the executable is not signed |
+| Linux | `grabbit-linux-x86_64.AppImage` | `chmod +x` and double-click (auto-update only works from the AppImage) |
+| macOS | `Grabbit-macos-aarch64.app.zip` (Apple Silicon) or `…-x86_64.app.zip` (Intel) | unzip, drag into *Applications*; the first time right-click → Open (the app is not notarized). If macOS calls it "damaged": `xattr -cr /Applications/Grabbit.app` |
 
-Dati e strumenti scaricati stanno in:
+Data and downloaded tools are stored in:
 Windows `%APPDATA%\Grabbit\Grabbit\data`, Linux `~/.local/share/grabbit`,
 macOS `~/Library/Application Support/org.Grabbit.Grabbit`.
 
-## Creare una release
+## Creating a release
 
-Le versioni per Windows, Linux e macOS si compilano **su GitHub**, in automatico
-(`.github/workflows/release.yml`). Non serve nessun programma installato sul tuo PC.
+The Windows, Linux and macOS versions are built **on GitHub**, automatically
+(`.github/workflows/release.yml`). Nothing needs to be installed on your PC.
 
-### Preparazione (una volta sola)
+### Preparation (once)
 
-1. Crea un repository su GitHub e caricaci il progetto (compresa la cartella `.github`).
-2. Non serve modificare `Cargo.toml`: le versioni compilate da GitHub cercano gli
-   aggiornamenti nel repository stesso da cui sono state compilate. (Solo se compili in
-   locale, imposta `repository` in `Cargo.toml` con il tuo indirizzo GitHub.)
-3. Su GitHub: *Settings → Actions → General → Workflow permissions* e scegli
-   **Read and write permissions** (serve per creare tag e release).
+1. Create a repository on GitHub and upload the project (including the `.github` folder).
+2. You do not need to edit `Cargo.toml`: the versions built by GitHub look for
+   updates in the very repository they were built from. (Only if you build locally,
+   set `repository` in `Cargo.toml` to your GitHub address.)
+3. On GitHub: *Settings → Actions → General → Workflow permissions* and choose
+   **Read and write permissions** (needed to create tags and releases).
 
-### Ogni volta che vuoi pubblicare una versione
+### Every time you want to publish a version
 
-1. Su GitHub apri la scheda **Actions** → a sinistra **Release** → **Run workflow**.
-2. Nel campo *Nuova versione* scrivi il numero, per esempio `0.2.0`, e conferma.
-3. Aspetta 10-20 minuti. Il workflow, da solo:
-   - aggiorna la versione in `Cargo.toml`/`Cargo.lock` e crea il tag `v0.2.0`;
-   - compila Windows, Linux e macOS (Intel e Apple Silicon);
-   - pubblica la release nella pagina **Releases** con tutti i file.
-4. Le app già installate trovano la nuova release al prossimo avvio e si aggiornano.
+1. On GitHub open the **Actions** tab → **Release** on the left → **Run workflow**.
+2. In the *New version* field type the number, for example `0.2.0`, and confirm.
+3. Wait 10-20 minutes. The workflow, by itself:
+   - updates the version in `Cargo.toml`/`Cargo.lock` and creates the tag `v0.2.0`;
+   - builds Windows, Linux and macOS (Intel and Apple Silicon);
+   - publishes the release on the **Releases** page with all the files.
+4. Apps that are already installed find the new release on their next launch and update.
 
-I numeri seguono il formato `maggiore.minore.patch`: `0.1.0` → `0.1.1` per una
-correzione, `0.2.0` per una novità, `1.0.0` per la prima versione stabile.
-Una versione già usata non si può ripubblicare: scegline una più alta.
+Numbers follow the `major.minor.patch` format: `0.1.0` → `0.1.1` for a fix,
+`0.2.0` for a new feature, `1.0.0` for the first stable version.
+A version that has already been used cannot be published again: pick a higher one.
 
-**Alternative**
+**Alternatives**
 
-- *Da terminale*: alza `version` in `Cargo.toml`, fai commit, poi
-  `git tag v0.2.0 && git push --tags`. Parte lo stesso workflow
-  (il tag deve coincidere con la versione di `Cargo.toml`, altrimenti si ferma).
-- *Solo prova*: *Run workflow* lasciando **vuoto** il campo versione. Compila tutto
-  e lascia i file in *Artifacts* a fondo pagina, senza pubblicare nulla.
+- *From a terminal*: raise `version` in `Cargo.toml`, commit, then
+  `git tag v0.2.0 && git push --tags`. The same workflow starts
+  (the tag must match the version in `Cargo.toml`, otherwise it stops).
+- *Test only*: *Run workflow* leaving the version field **empty**. It builds everything
+  and leaves the files in *Artifacts* at the bottom of the page, publishing nothing.
 
-### File prodotti (nomi da non cambiare: li cerca l'aggiornamento automatico)
+### Files produced (do not rename them: automatic updates look for these names)
 
-| File | A cosa serve |
+| File | Purpose |
 |---|---|
 | `grabbit-windows-x86_64.exe` | Windows |
 | `grabbit-linux-x86_64.AppImage` | Linux Intel/AMD |
-| `grabbit-linux-aarch64.AppImage` | Linux ARM (solo se il repository è pubblico) |
-| `Grabbit-macos-aarch64.app.zip` / `Grabbit-macos-x86_64.app.zip` | macOS, prima installazione |
-| `grabbit-macos-aarch64` / `grabbit-macos-x86_64` | macOS, usati dall'aggiornamento automatico |
+| `grabbit-linux-aarch64.AppImage` | Linux ARM (only if the repository is public) |
+| `Grabbit-macos-aarch64.app.zip` / `Grabbit-macos-x86_64.app.zip` | macOS, first installation |
+| `grabbit-macos-aarch64` / `grabbit-macos-x86_64` | macOS, used by automatic updates |
 
-### Se qualcosa va storto
+### If something goes wrong
 
-- **«Permission denied» o «protected branch»** nel passo *prepare*: i permessi del
-  punto 3 della preparazione mancano, oppure il ramo `main` è protetto e non accetta
-  commit dal workflow. In quel caso alza la versione a mano e usa il metodo del tag.
-- **«Process completed with exit code 126»**: un file di script ha perso il permesso
-  di esecuzione nel caricamento (zip/Windows). Il workflow lancia già gli script con
-  `bash`, quindi basta usare l'ultima versione dei file.
-- **Avvisi «Node.js 20 is deprecated»**: sono solo avvisi di GitHub, non errori.
-- **Una build fallisce**: apri il lavoro rosso, leggi l'errore (di solito è nelle
-  ultime righe) e correggi il codice. La release non viene pubblicata a metà: esce solo
-  se Windows, Linux e macOS riescono. Dopo la correzione, rilancia con una versione nuova
-  (se il workflow ha già creato il tag, cancellalo da *Code → Tags* o usa il numero successivo).
-- Il workflow **CI** gira a ogni push e controlla formattazione, avvisi e test su
-  tutti e tre i sistemi, così gli errori si vedono prima della release.
+- **"Permission denied" or "protected branch"** in the *prepare* step: the permissions in
+  step 3 of the preparation are missing, or the `main` branch is protected and does not accept
+  commits from the workflow. In that case raise the version by hand and use the tag method.
+- **"Process completed with exit code 126"**: a script file lost its execute permission
+  during upload (zip/Windows). The workflow already runs scripts with `bash`,
+  so using the latest version of the files is enough.
+- **"Node.js 20 is deprecated" warnings**: they are just GitHub warnings, not errors.
+- **A build fails**: open the red job and read the error (usually in the last lines),
+  then fix the code. The release is never published halfway: it only goes out if Windows,
+  Linux and macOS all succeed. After the fix, run again with a new version
+  (if the workflow already created the tag, delete it from *Code → Tags* or use the next number).
+- The **CI** workflow runs on every push and checks formatting, warnings and tests on
+  all three systems, so errors show up before the release.
 
-## Compilare in locale su Windows
+## Building locally on Windows
 
-Con Rust installato (<https://rustup.rs>) fai doppio clic su `packaging\windows\build.bat`:
-crea `grabbit-windows-x86_64.exe`.
+With Rust installed (<https://rustup.rs>) double-click `packaging\windows\build.bat`:
+it creates `grabbit-windows-x86_64.exe`.
 
-## Compilare da sorgente
-
-```bash
-cargo run --release                      # avvio
-cargo test                               # test unitari
-packaging/linux/build-appimage.sh        # crea l'AppImage (Linux)
-python3 scripts/make_icon.py             # rigenera le icone (serve Pillow)
-```
-
-Serve Rust 1.85+. Su Linux non servono librerie di sviluppo particolari.
-
-Prove con yt-dlp reale (facoltative):
+## Building from source
 
 ```bash
-GRABBIT_YTDLP=/percorso/yt-dlp cargo test -- --ignored
+cargo run --release                      # run
+cargo test                               # unit tests
+packaging/linux/build-appimage.sh        # create the AppImage (Linux)
+python3 scripts/make_icon.py             # regenerate the icons (needs Pillow)
 ```
 
-## Struttura
+Requires Rust 1.85+. On Linux no special development libraries are needed.
 
-| File | Compito |
+Tests against a real yt-dlp (optional):
+
+```bash
+GRABBIT_YTDLP=/path/to/yt-dlp cargo test -- --ignored
+```
+
+To force the interface language (for testing): `GRABBIT_LANG=it` or `GRABBIT_LANG=en`.
+
+## Structure
+
+| File | Purpose |
 |---|---|
-| `src/app.rs` | interfaccia grafica (egui) |
-| `src/downloader.rs` | costruisce i comandi yt-dlp, legge l'avanzamento, annulla |
-| `src/tools.rs` | scarica/aggiorna yt-dlp, Deno, ffmpeg |
-| `src/spotify.rs` | legge titolo/artista dai link Spotify |
-| `src/selfupdate.rs` | aggiornamento automatico dell'app |
-| `src/config.rs` | impostazioni salvate |
+| `src/app.rs` | graphical interface (egui) |
+| `src/downloader.rs` | builds the yt-dlp commands, reads progress, cancels |
+| `src/tools.rs` | downloads/updates yt-dlp, Deno, ffmpeg |
+| `src/spotify.rs` | reads title/artist from Spotify links |
+| `src/selfupdate.rs` | automatic app updates |
+| `src/config.rs` | saved settings |
+| `src/i18n.rs` | interface language (Italian / English) |
 
-## Problemi comuni
+## Common problems
 
-- **L'aggiornamento automatico non parte**: leggi la riga di stato in fondo alla finestra.
-  Dice se Grabbit è già aggiornato, se non c'è nessuna release (o il repository è privato:
-  l'app non può leggerlo, serve un repository pubblico), se GitHub ha limitato le richieste,
-  o se la release non contiene il file per il tuo sistema. Il pulsante *Controlla
-  aggiornamenti di Grabbit* nelle opzioni avanzate rifà il controllo subito. Dopo un
-  aggiornamento l'app si riavvia una volta sola e non si aggiorna di nuovo in quella
-  esecuzione, per evitare cicli.
+- **Automatic update does not start**: read the status line at the bottom of the window.
+  It says whether Grabbit is already up to date, whether there is no release (or the repository
+  is private: the app cannot read it, a public repository is needed), whether GitHub rate-limited
+  the requests, or whether the release does not contain the file for your system. The *Check for
+  Grabbit updates* button in the advanced options repeats the check immediately. After an
+  update the app restarts once and does not update again in that run, to avoid loops.
+- **"Sign in to confirm you're not a bot" / restricted videos**: in
+  *Advanced options* choose the browser to take cookies from.
+- **macOS**: ffmpeg is downloaded as the Intel version (it runs through Rosetta on Apple
+  Silicon); if you have Homebrew (`brew install ffmpeg`) that one is used instead.
+- **Linux without AppImage** (binary started by hand): it works, but the app cannot
+  replace itself; it only shows the link to the new release.
 
-- **«Sign in to confirm you're not a bot» / video con restrizioni**: in
-  *Opzioni avanzate* scegli il browser da cui prendere i cookie.
-- **macOS**: ffmpeg viene scaricato in versione Intel (su Apple Silicon usa
-  Rosetta); se hai Homebrew (`brew install ffmpeg`) viene usato quello.
-- **Linux senza AppImage** (binario avviato a mano): funziona, ma l'app non
-  può sostituire se stessa; mostra solo il link alla nuova release.
+## License
 
-## Licenza
-
-MIT, vedi `LICENSE`.
+Grabbit is free software, released under the
+[GNU General Public License v3.0 or later](https://www.gnu.org/licenses/gpl-3.0.html)
+(`GPL-3.0-or-later`); see `LICENSE`. You may use, study, share and modify it; if you
+distribute modified versions, they must be released under the same license with their source code.

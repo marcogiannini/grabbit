@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Interfaccia grafica (egui).
 use crate::config::{Config, Mode};
 use crate::downloader::{self, Emit, Event, Toolset};
 use crate::selfupdate::{self, Release};
 use crate::tools;
+use crate::tr;
 use eframe::egui::{self, Color32, RichText};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -166,7 +168,7 @@ impl App {
     fn start_setup(&mut self, ctx: &egui::Context) {
         self.tools.busy = true;
         self.tools.error = None;
-        self.tools.status = "Preparazione…".into();
+        self.tools.status = tr!("Preparazione…", "Preparing…").into();
         let send = self.sender(ctx);
         thread::spawn(move || {
             let mut status = |s: String| send(Msg::ToolsStatus(s));
@@ -179,10 +181,10 @@ impl App {
             };
             let mut warnings = Vec::new();
             let deno = tools::ensure_deno(&mut status)
-                .map_err(|e| warnings.push(format!("Deno non disponibile ({e:#}): alcuni video YouTube potrebbero non funzionare.")))
+                .map_err(|e| warnings.push(tr!(format!("Deno non disponibile ({e:#}): alcuni video YouTube potrebbero non funzionare."), format!("Deno is not available ({e:#}): some YouTube videos may not work."))))
                 .ok();
             let ffmpeg = tools::ensure_ffmpeg(&mut status)
-                .map_err(|e| warnings.push(format!("ffmpeg non disponibile ({e:#}): servono per conversione audio e unione video/audio. Installalo e riavvia.")))
+                .map_err(|e| warnings.push(tr!(format!("ffmpeg non disponibile ({e:#}): serve per la conversione audio e l'unione video/audio. Installalo e riavvia."), format!("ffmpeg is not available ({e:#}): it is needed for audio conversion and merging video/audio. Install it and restart."))))
                 .ok();
             send(Msg::ToolsReady {
                 ytdlp,
@@ -196,7 +198,7 @@ impl App {
     /// Cerca una nuova versione di Grabbit su GitHub (in un thread a parte).
     fn start_update_check(&mut self, ctx: &egui::Context) {
         self.update_checking = true;
-        self.update_status = "Controllo aggiornamenti…".into();
+        self.update_status = tr!("Controllo aggiornamenti…", "Checking for updates…").into();
         let send = self.sender(ctx);
         thread::spawn(move || {
             let r = selfupdate::check().map_err(|e| selfupdate::describe_error(&e));
@@ -206,7 +208,7 @@ impl App {
 
     fn start_update(&mut self, ctx: &egui::Context, rel: Release, auto: bool) {
         self.update_auto = auto;
-        self.update = UpdateUi::Working("Avvio aggiornamento…".into());
+        self.update = UpdateUi::Working(tr!("Avvio aggiornamento…", "Starting update…").into());
         let send = self.sender(ctx);
         thread::spawn(move || {
             let mut st = |s: String| send(Msg::UpdateStatus(s));
@@ -226,8 +228,10 @@ impl App {
             return;
         }
         if let Err(e) = std::fs::create_dir_all(&self.cfg.out_dir) {
-            self.log
-                .push(format!("Impossibile creare la cartella: {e}"));
+            self.log.push(tr!(
+                format!("Impossibile creare la cartella: {e}"),
+                format!("Could not create the folder: {e}")
+            ));
             return;
         }
         self.cfg.save();
@@ -251,7 +255,10 @@ impl App {
         let start = self.cfg.out_dir.clone();
         thread::spawn(move || {
             if let Some(p) = rfd::FileDialog::new()
-                .set_title("Scegli la cartella di download")
+                .set_title(tr!(
+                    "Scegli la cartella di download",
+                    "Choose the download folder"
+                ))
                 .set_directory(start)
                 .pick_folder()
             {
@@ -283,15 +290,18 @@ impl App {
                 self.update_checking = false;
                 use selfupdate::Check;
                 self.update_status = match result {
-                    Err(e) => format!("Controllo aggiornamenti non riuscito: {e}"),
-                    Ok(Check::NotConfigured) => "Aggiornamenti non attivi: repository GitHub non impostato (campo repository di Cargo.toml)".into(),
-                    Ok(Check::NoRelease) => format!(
-                        "Nessuna release trovata su GitHub ({}). Se il repository è privato, l'app non può leggerlo.",
-                        selfupdate::repository().unwrap_or_default()
-                    ),
-                    Ok(Check::UpToDate) => format!("Grabbit {} è aggiornato", selfupdate::CURRENT),
+                    Err(e) => tr!(format!("Controllo aggiornamenti non riuscito: {e}"), format!("Update check failed: {e}")),
+                    Ok(Check::NotConfigured) => tr!("Aggiornamenti non attivi: repository GitHub non impostato (campo repository di Cargo.toml)", "Updates are off: GitHub repository not set (repository field in Cargo.toml)").into(),
+                    Ok(Check::NoRelease) => {
+                        let repo = selfupdate::repository().unwrap_or_default();
+                        tr!(
+                            format!("Nessuna release trovata su GitHub ({repo}). Se il repository è privato, l'app non può leggerlo."),
+                            format!("No release found on GitHub ({repo}). If the repository is private, the app cannot read it.")
+                        )
+                    }
+                    Ok(Check::UpToDate) => tr!(format!("Grabbit {} è aggiornato", selfupdate::CURRENT), format!("Grabbit {} is up to date", selfupdate::CURRENT)),
                     Ok(Check::Newer(rel)) => {
-                        let msg = format!("Disponibile la versione {}", rel.version);
+                        let msg = tr!(format!("Disponibile la versione {}", rel.version), format!("Version {} is available", rel.version));
                         if self.cfg.auto_update_app
                             && self.auto_install
                             && selfupdate::supported()
@@ -314,8 +324,13 @@ impl App {
                     self.cfg.save();
                     selfupdate::restart();
                 }
-                self.update =
-                    UpdateUi::Ready("Aggiornamento installato. Riavvia per usarlo.".into())
+                self.update = UpdateUi::Ready(
+                    tr!(
+                        "Aggiornamento installato. Riavvia per usarlo.",
+                        "Update installed. Restart to use it."
+                    )
+                    .into(),
+                )
             }
             Msg::UpdateDone(Err(e)) => self.update = UpdateUi::Failed(e),
             Msg::Folder(p) => self.cfg.out_dir = p,
@@ -416,8 +431,11 @@ impl App {
             ui.vertical(|ui| {
                 ui.label(RichText::new("Grabbit").size(28.0).strong());
                 ui.label(
-                    RichText::new("Video e musica da YouTube e Spotify")
-                        .color(ui.visuals().weak_text_color()),
+                    RichText::new(tr!(
+                        "Video e musica da YouTube e Spotify",
+                        "Video and music from YouTube and Spotify"
+                    ))
+                    .color(ui.visuals().weak_text_color()),
                 );
             });
         });
@@ -432,39 +450,49 @@ impl App {
                 card(ui, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            RichText::new(format!("Nuova versione {} disponibile", rel.version))
-                                .strong()
-                                .color(ACCENT),
+                            RichText::new(tr!(
+                                format!("Nuova versione {} disponibile", rel.version),
+                                format!("New version {} available", rel.version)
+                            ))
+                            .strong()
+                            .color(ACCENT),
                         );
                         if selfupdate::supported() && rel.asset_url.is_some() {
-                            if ui.button("Aggiorna ora").clicked() {
+                            if ui.button(tr!("Aggiorna ora", "Update now")).clicked() {
                                 start = Some(rel.clone());
                             }
                         } else if !rel.page_url.is_empty() {
-                            ui.hyperlink_to("Scarica dal sito", &rel.page_url);
+                            ui.hyperlink_to(
+                                tr!("Scarica dal sito", "Download from the website"),
+                                &rel.page_url,
+                            );
                         }
                     });
                     if rel.asset_url.is_none() {
                         ui.label(
-                            RichText::new(format!(
-                                "La release non contiene il file «{}» per questo sistema.",
-                                selfupdate::asset_name().unwrap_or_default()
-                            ))
+                            RichText::new({
+                                let f = selfupdate::asset_name().unwrap_or_default();
+                                tr!(
+                                    format!("La release non contiene il file «{f}» per questo sistema."),
+                                    format!("The release does not contain the file “{f}” for this system.")
+                                )
+                            })
                             .small()
                             .color(WARN),
                         );
                     } else if !selfupdate::supported() {
                         ui.label(
-                            RichText::new(
+                            RichText::new(tr!(
                                 "Per aggiornarsi da sola, l'app va avviata dal file AppImage.",
-                            )
+                                "To update itself, the app must be run from the AppImage file."
+                            ))
                             .small()
                             .color(ui.visuals().weak_text_color()),
                         );
                     }
                     let notes = rel.notes.trim();
                     if !notes.is_empty() {
-                        ui.collapsing("Novità", |ui| {
+                        ui.collapsing(tr!("Novità", "What's new"), |ui| {
                             ui.label(RichText::new(notes).small());
                         });
                     }
@@ -482,7 +510,7 @@ impl App {
                 card(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(s).color(OK));
-                        if ui.button("Riavvia ora").clicked() {
+                        if ui.button(tr!("Riavvia ora", "Restart now")).clicked() {
                             restart = true;
                         }
                     });
@@ -490,7 +518,13 @@ impl App {
             }
             UpdateUi::Failed(e) => {
                 card(ui, |ui| {
-                    ui.label(RichText::new(format!("Aggiornamento non riuscito: {e}")).color(ERR));
+                    ui.label(
+                        RichText::new(tr!(
+                            format!("Aggiornamento non riuscito: {e}"),
+                            format!("Update failed: {e}")
+                        ))
+                        .color(ERR),
+                    );
                 });
             }
         }
@@ -516,19 +550,24 @@ impl App {
         if let Some(e) = self.tools.error.clone() {
             card(ui, |ui| {
                 ui.label(
-                    RichText::new("Impossibile preparare yt-dlp")
-                        .strong()
-                        .color(ERR),
+                    RichText::new(tr!(
+                        "Impossibile preparare yt-dlp",
+                        "Could not set up yt-dlp"
+                    ))
+                    .strong()
+                    .color(ERR),
                 );
                 ui.label(e);
-                if ui.button("Riprova").clicked() {
+                if ui.button(tr!("Riprova", "Retry")).clicked() {
                     self.start_setup(ctx);
                 }
             });
             ui.add_space(6.0);
         }
         for w in &self.tools.warnings {
-            ui.label(RichText::new(format!("Attenzione: {w}")).color(WARN));
+            ui.label(
+                RichText::new(tr!(format!("Attenzione: {w}"), format!("Warning: {w}"))).color(WARN),
+            );
         }
     }
 
@@ -538,8 +577,8 @@ impl App {
             let mut paste = false;
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Link").strong());
-                paste = ui.small_button("Incolla").clicked();
-                if ui.small_button("Svuota").clicked() {
+                paste = ui.small_button(tr!("Incolla", "Paste")).clicked();
+                if ui.small_button(tr!("Svuota", "Clear")).clicked() {
                     self.input.clear();
                 }
             });
@@ -548,16 +587,17 @@ impl App {
                     .id(field_id)
                     .desired_rows(3)
                     .desired_width(f32::INFINITY)
-                    .hint_text(
+                    .hint_text(tr!(
                         "Incolla qui uno o più link YouTube o Spotify, uno per riga (Ctrl+V)",
-                    ),
+                        "Paste one or more YouTube or Spotify links here, one per line (Ctrl+V)"
+                    )),
             );
             resp.context_menu(|ui| {
-                if ui.button("Incolla").clicked() {
+                if ui.button(tr!("Incolla", "Paste")).clicked() {
                     paste = true;
                     ui.close();
                 }
-                if ui.button("Svuota").clicked() {
+                if ui.button(tr!("Svuota", "Clear")).clicked() {
                     self.input.clear();
                     ui.close();
                 }
@@ -576,7 +616,7 @@ impl App {
             ui.horizontal(|ui| {
                 for (mode, label) in [
                     (Mode::Video, "  Video  "),
-                    (Mode::Audio, "  Audio (musica)  "),
+                    (Mode::Audio, tr!("  Audio (musica)  ", "  Audio (music)  ")),
                 ] {
                     let selected = self.cfg.mode == mode;
                     let text = RichText::new(label).size(16.0).color(if selected {
@@ -597,7 +637,7 @@ impl App {
                 .show(ui, |ui| {
                     match self.cfg.mode {
                         Mode::Video => {
-                            ui.label("Formato");
+                            ui.label(tr!("Formato", "Format"));
                             egui::ComboBox::from_id_salt("vf")
                                 .selected_text(label_of(&VIDEO_FORMATS, &self.cfg.video_container))
                                 .show_ui(ui, |ui| {
@@ -605,29 +645,29 @@ impl App {
                                         ui.selectable_value(
                                             &mut self.cfg.video_container,
                                             v.to_string(),
-                                            l,
+                                            loc(l),
                                         );
                                     }
                                 });
                             ui.end_row();
-                            ui.label("Qualità massima");
+                            ui.label(tr!("Qualità massima", "Maximum quality"));
                             egui::ComboBox::from_id_salt("vh")
                                 .selected_text(
                                     HEIGHTS
                                         .iter()
                                         .find(|h| h.0 == self.cfg.max_height)
-                                        .map(|h| h.1)
-                                        .unwrap_or("Migliore disponibile"),
+                                        .map(|h| loc(h.1))
+                                        .unwrap_or(tr!("Migliore disponibile", "Best available")),
                                 )
                                 .show_ui(ui, |ui| {
                                     for (v, l) in HEIGHTS {
-                                        ui.selectable_value(&mut self.cfg.max_height, v, l);
+                                        ui.selectable_value(&mut self.cfg.max_height, v, loc(l));
                                     }
                                 });
                             ui.end_row();
                         }
                         Mode::Audio => {
-                            ui.label("Formato");
+                            ui.label(tr!("Formato", "Format"));
                             egui::ComboBox::from_id_salt("af")
                                 .selected_text(label_of(&AUDIO_FORMATS, &self.cfg.audio_format))
                                 .show_ui(ui, |ui| {
@@ -635,7 +675,7 @@ impl App {
                                         ui.selectable_value(
                                             &mut self.cfg.audio_format,
                                             v.to_string(),
-                                            l,
+                                            loc(l),
                                         );
                                     }
                                 });
@@ -662,9 +702,9 @@ impl App {
                             ui.end_row();
                         }
                     }
-                    ui.label("Salva in");
+                    ui.label(tr!("Salva in", "Save to"));
                     ui.horizontal(|ui| {
-                        if ui.button("Sfoglia…").clicked() {
+                        if ui.button(tr!("Sfoglia…", "Browse…")).clicked() {
                             self.pick_folder(ctx);
                         }
                         ui.label(self.cfg.out_dir.to_string_lossy());
@@ -675,37 +715,54 @@ impl App {
             ui.add_space(4.0);
             ui.checkbox(
                 &mut self.cfg.playlist,
-                "Scarica l'intera playlist (se il link è una playlist)",
+                tr!(
+                    "Scarica l'intera playlist (se il link è una playlist)",
+                    "Download the whole playlist (if the link is a playlist)"
+                ),
             );
-            ui.checkbox(&mut self.cfg.embed_meta, "Incorpora copertina e metadati");
+            ui.checkbox(
+                &mut self.cfg.embed_meta,
+                tr!(
+                    "Incorpora copertina e metadati",
+                    "Embed cover art and metadata"
+                ),
+            );
             if self.cfg.mode == Mode::Video {
                 ui.label(
-                    RichText::new("I link Spotify vengono sempre scaricati come audio.")
-                        .small()
-                        .color(ui.visuals().weak_text_color()),
+                    RichText::new(tr!(
+                        "I link Spotify vengono sempre scaricati come audio.",
+                        "Spotify links are always downloaded as audio."
+                    ))
+                    .small()
+                    .color(ui.visuals().weak_text_color()),
                 );
             }
 
-            ui.collapsing("Opzioni avanzate", |ui| {
+            ui.collapsing(tr!("Opzioni avanzate", "Advanced options"), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("Usa i cookie del browser");
+                    ui.label(tr!("Usa i cookie del browser", "Use browser cookies"));
                     egui::ComboBox::from_id_salt("ck")
                         .selected_text(label_of(&BROWSERS, &self.cfg.cookies_browser))
                         .show_ui(ui, |ui| {
                             for (v, l) in BROWSERS {
-                                ui.selectable_value(&mut self.cfg.cookies_browser, v.to_string(), l);
+                                ui.selectable_value(&mut self.cfg.cookies_browser, v.to_string(), loc(l));
                             }
                         });
                 });
-                ui.label(RichText::new("Utile per video con restrizioni d'età o quando YouTube chiede di dimostrare che non sei un robot.").small().color(ui.visuals().weak_text_color()));
+                ui.label(RichText::new(tr!("Utile per video con restrizioni d'età o quando YouTube chiede di dimostrare che non sei un robot.", "Useful for age-restricted videos or when YouTube asks you to prove you are not a robot.")).small().color(ui.visuals().weak_text_color()));
                 ui.horizontal(|ui| {
-                    ui.label("Dimensione del testo");
-                    let sizes = [(1.0_f32, "Normale"), (1.15, "Grande"), (1.3, "Molto grande"), (1.5, "Enorme")];
+                    ui.label(tr!("Dimensione del testo", "Text size"));
+                    let sizes = [
+                        (1.0_f32, tr!("Normale", "Normal")),
+                        (1.15, tr!("Grande", "Large")),
+                        (1.3, tr!("Molto grande", "Very large")),
+                        (1.5, tr!("Enorme", "Huge")),
+                    ];
                     let current = sizes
                         .iter()
                         .find(|(v, _)| (self.cfg.ui_scale - v).abs() < 0.01)
                         .map(|(_, l)| *l)
-                        .unwrap_or("Personalizzata");
+                        .unwrap_or(tr!("Personalizzata", "Custom"));
                     egui::ComboBox::from_id_salt("scale")
                         .selected_text(current)
                         .show_ui(ui, |ui| {
@@ -716,19 +773,19 @@ impl App {
                                 }
                             }
                         });
-                    ui.label(RichText::new("(oppure Ctrl + e Ctrl −)").small().color(ui.visuals().weak_text_color()));
+                    ui.label(RichText::new(tr!("(oppure Ctrl + e Ctrl −)", "(or Ctrl + and Ctrl −)")).small().color(ui.visuals().weak_text_color()));
                 });
-                ui.checkbox(&mut self.cfg.auto_update_app, "Installa automaticamente gli aggiornamenti di Grabbit");
+                ui.checkbox(&mut self.cfg.auto_update_app, tr!("Installa automaticamente gli aggiornamenti di Grabbit", "Install Grabbit updates automatically"));
                 ui.horizontal(|ui| {
                     let can_check = !self.update_checking && !matches!(self.update, UpdateUi::Working(_));
-                    if ui.add_enabled(can_check, egui::Button::new("Controlla aggiornamenti di Grabbit")).clicked() {
+                    if ui.add_enabled(can_check, egui::Button::new(tr!("Controlla aggiornamenti di Grabbit", "Check for Grabbit updates"))).clicked() {
                         self.auto_install = true;
                         self.start_update_check(ctx);
                     }
-                    if ui.add_enabled(!self.tools.busy && !self.running, egui::Button::new("Aggiorna yt-dlp ora")).clicked() {
+                    if ui.add_enabled(!self.tools.busy && !self.running, egui::Button::new(tr!("Aggiorna yt-dlp ora", "Update yt-dlp now"))).clicked() {
                         self.start_setup(ctx);
                     }
-                    if ui.button("Apri cartella dei download").clicked() {
+                    if ui.button(tr!("Apri cartella dei download", "Open downloads folder")).clicked() {
                         open_folder(&self.cfg.out_dir);
                     }
                 });
@@ -759,7 +816,7 @@ impl App {
                     )
                 };
                 let btn = egui::Button::new(
-                    RichText::new("   Scarica   ")
+                    RichText::new(tr!("   Scarica   ", "   Download   "))
                         .size(18.0)
                         .strong()
                         .color(text_color),
@@ -775,7 +832,8 @@ impl App {
                 if ui.add(btn).clicked() {
                     self.start_download(ctx);
                 }
-                if !self.jobs.is_empty() && ui.button("Pulisci elenco").clicked() {
+                if !self.jobs.is_empty() && ui.button(tr!("Pulisci elenco", "Clear list")).clicked()
+                {
                     self.jobs.clear();
                 }
             }
@@ -822,7 +880,7 @@ impl App {
             return;
         }
         ui.add_space(6.0);
-        ui.collapsing("Registro dettagliato", |ui| {
+        ui.collapsing(tr!("Registro dettagliato", "Detailed log"), |ui| {
             egui::ScrollArea::vertical()
                 .max_height(180.0)
                 .stick_to_bottom(true)
@@ -837,7 +895,7 @@ impl App {
     fn footer(&self, ui: &mut egui::Ui) {
         ui.separator();
         let yt = self.tools.ytdlp.as_deref().unwrap_or("…");
-        let ok = |b: bool| if b { "ok" } else { "manca" };
+        let ok = |b: bool| if b { "ok" } else { tr!("manca", "missing") };
         ui.label(
             RichText::new(format!(
                 "Grabbit {} · yt-dlp {} · ffmpeg {} · Deno {}",
@@ -857,7 +915,7 @@ impl App {
             );
         }
         ui.label(
-            RichText::new("Usalo solo per contenuti che hai il diritto di scaricare, nel rispetto del copyright e dei termini dei servizi.")
+            RichText::new(tr!("Usalo solo per contenuti che hai il diritto di scaricare, nel rispetto del copyright e dei termini dei servizi.", "Use it only for content you have the right to download, respecting copyright and the services' terms."))
                 .small()
                 .color(ui.visuals().weak_text_color()),
         );
@@ -866,11 +924,22 @@ impl App {
 
 // ───────────────────────────── utilità ─────────────────────────────
 
-fn label_of<'a>(list: &'a [(&'a str, &'a str)], key: &str) -> &'a str {
+fn label_of(list: &[(&str, &'static str)], key: &str) -> &'static str {
     list.iter()
         .find(|(k, _)| *k == key)
-        .map(|(_, l)| *l)
+        .map(|(_, l)| loc(l))
         .unwrap_or("—")
+}
+
+/// Traduce le etichette fisse delle liste (scritte in italiano) nella lingua attiva.
+fn loc(label: &'static str) -> &'static str {
+    match label {
+        "Migliore disponibile" => tr!("Migliore disponibile", "Best available"),
+        "FLAC (senza perdita)" => tr!("FLAC (senza perdita)", "FLAC (lossless)"),
+        "WAV (senza perdita)" => tr!("WAV (senza perdita)", "WAV (lossless)"),
+        "Nessuno" => tr!("Nessuno", "None"),
+        other => other,
+    }
 }
 
 fn open_folder(p: &std::path::Path) {

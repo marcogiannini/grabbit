@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Impostazioni salvate su disco (JSON nella cartella di configurazione).
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

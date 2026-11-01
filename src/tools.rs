@@ -1,7 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Gestione degli strumenti esterni: yt-dlp, Deno (runtime JS richiesto da
 //! yt-dlp per YouTube) e ffmpeg. Vengono scaricati nella cartella dati
 //! dell'app e tenuti aggiornati automaticamente.
 use crate::net;
+use crate::tr;
 use anyhow::{anyhow, bail, Context, Result};
 use directories::ProjectDirs;
 use std::ffi::OsStr;
@@ -97,7 +99,12 @@ fn latest_ytdlp_version() -> Result<String> {
     v["tag_name"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or_else(|| anyhow!("risposta GitHub senza tag_name"))
+        .ok_or_else(|| {
+            anyhow!(tr!(
+                "risposta GitHub senza tag_name",
+                "GitHub reply without tag_name"
+            ))
+        })
 }
 
 fn install_ytdlp(status: &mut dyn FnMut(String)) -> Result<()> {
@@ -107,7 +114,10 @@ fn install_ytdlp(status: &mut dyn FnMut(String)) -> Result<()> {
     );
     let dest = ytdlp_path();
     net::download(&url, &dest, &mut |d, t| {
-        status(format!("Scarico yt-dlp… {}", pct(d, t)))
+        status(tr!(
+            format!("Scarico yt-dlp… {}", pct(d, t)),
+            format!("Downloading yt-dlp… {}", pct(d, t))
+        ))
     })?;
     make_executable(&dest)?;
     Ok(())
@@ -118,20 +128,35 @@ fn install_ytdlp(status: &mut dyn FnMut(String)) -> Result<()> {
 pub fn ensure_ytdlp(status: &mut dyn FnMut(String)) -> Result<String> {
     match local_ytdlp_version() {
         None => {
-            install_ytdlp(status).context("installazione di yt-dlp")?;
+            install_ytdlp(status).context(tr!("installazione di yt-dlp", "installing yt-dlp"))?;
         }
         Some(local) => {
-            status("Controllo aggiornamenti di yt-dlp…".into());
+            status(
+                tr!(
+                    "Controllo aggiornamenti di yt-dlp…",
+                    "Checking for yt-dlp updates…"
+                )
+                .into(),
+            );
             // se il controllo fallisce (offline, rate limit) si usa la versione locale
             if let Ok(latest) = latest_ytdlp_version() {
                 if latest != local {
-                    status(format!("Aggiorno yt-dlp {local} → {latest}…"));
-                    install_ytdlp(status).context("aggiornamento di yt-dlp")?;
+                    status(tr!(
+                        format!("Aggiorno yt-dlp {local} → {latest}…"),
+                        format!("Updating yt-dlp {local} → {latest}…")
+                    ));
+                    install_ytdlp(status)
+                        .context(tr!("aggiornamento di yt-dlp", "updating yt-dlp"))?;
                 }
             }
         }
     }
-    local_ytdlp_version().ok_or_else(|| anyhow!("yt-dlp non si avvia dopo l'installazione"))
+    local_ytdlp_version().ok_or_else(|| {
+        anyhow!(tr!(
+            "yt-dlp non si avvia dopo l'installazione",
+            "yt-dlp does not start after installation"
+        ))
+    })
 }
 
 // ───────────────────────────── Deno ─────────────────────────────
@@ -154,20 +179,28 @@ pub fn ensure_deno(status: &mut dyn FnMut(String)) -> Result<PathBuf> {
     if dest.exists() {
         return Ok(dest);
     }
-    let target = deno_target().ok_or_else(|| anyhow!("piattaforma non supportata per Deno"))?;
+    let target = deno_target().ok_or_else(|| {
+        anyhow!(tr!(
+            "piattaforma non supportata per Deno",
+            "platform not supported for Deno"
+        ))
+    })?;
     let url =
         format!("https://github.com/denoland/deno/releases/latest/download/deno-{target}.zip");
     let tmp = data_dir().join("deno.zip");
     net::download(&url, &tmp, &mut |d, t| {
-        status(format!(
-            "Scarico il runtime JavaScript (Deno)… {}",
-            pct(d, t)
+        status(tr!(
+            format!("Scarico il runtime JavaScript (Deno)… {}", pct(d, t)),
+            format!("Downloading the JavaScript runtime (Deno)… {}", pct(d, t))
         ))
     })?;
     extract_zip(&tmp, &[&format!("deno{EXE}")], &bin_dir())?;
     let _ = fs::remove_file(&tmp);
     if !dest.exists() {
-        bail!("Deno non trovato nell'archivio");
+        bail!(tr!(
+            "Deno non trovato nell'archivio",
+            "Deno not found in the archive"
+        ));
     }
     Ok(dest)
 }
@@ -198,7 +231,12 @@ pub fn ensure_ffmpeg(status: &mut dyn FnMut(String)) -> Result<PathBuf> {
     let dest = bin_dir();
     fs::create_dir_all(&dest)?;
     let tmp = data_dir().join("ffmpeg-download");
-    let mut progress = |d: u64, t: Option<u64>| status(format!("Scarico ffmpeg… {}", pct(d, t)));
+    let mut progress = |d: u64, t: Option<u64>| {
+        status(tr!(
+            format!("Scarico ffmpeg… {}", pct(d, t)),
+            format!("Downloading ffmpeg… {}", pct(d, t))
+        ))
+    };
 
     #[cfg(windows)]
     {
@@ -227,11 +265,16 @@ pub fn ensure_ffmpeg(status: &mut dyn FnMut(String)) -> Result<PathBuf> {
             "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-{arch}-gpl.tar.xz"
         );
         net::download(&url, &tmp, &mut progress)?;
-        status("Estraggo ffmpeg…".into());
+        status(tr!("Estraggo ffmpeg…", "Extracting ffmpeg…").into());
         extract_tar_xz(&tmp, &dest)?;
     }
     let _ = fs::remove_file(&tmp);
-    find_ffmpeg_dir().ok_or_else(|| anyhow!("ffmpeg non trovato dopo l'estrazione"))
+    find_ffmpeg_dir().ok_or_else(|| {
+        anyhow!(tr!(
+            "ffmpeg non trovato dopo l'estrazione",
+            "ffmpeg not found after extraction"
+        ))
+    })
 }
 
 // ─────────────────────────── estrazione archivi ───────────────────────────

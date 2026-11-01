@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Aggiornamento automatico di Grabbit stesso.
 //!
 //! Legge l'ultima release del repository indicato in `Cargo.toml`
@@ -8,6 +9,7 @@
 //!   • Windows : grabbit-windows-x86_64.exe
 //!   • Linux   : grabbit-linux-x86_64.AppImage   (e -aarch64)
 //!   • macOS   : grabbit-macos-aarch64 / grabbit-macos-x86_64  (binario nudo)
+use crate::tr;
 use crate::{net, tools};
 use anyhow::{anyhow, Result};
 use std::fs;
@@ -119,10 +121,15 @@ fn status_code(e: &anyhow::Error) -> Option<u16> {
 /// Messaggio comprensibile per un errore del controllo.
 pub fn describe_error(e: &anyhow::Error) -> String {
     match status_code(e) {
-        Some(403) | Some(429) => {
-            "GitHub ha limitato le richieste, riprova tra qualche minuto".into()
-        }
-        Some(code) => format!("GitHub ha risposto con errore {code}"),
+        Some(403) | Some(429) => tr!(
+            "GitHub ha limitato le richieste, riprova tra qualche minuto",
+            "GitHub rate-limited the requests, try again in a few minutes"
+        )
+        .into(),
+        Some(code) => tr!(
+            format!("GitHub ha risposto con errore {code}"),
+            format!("GitHub replied with error {code}")
+        ),
         None => format!("{e:#}"),
     }
 }
@@ -130,7 +137,10 @@ pub fn describe_error(e: &anyhow::Error) -> String {
 /// Note da mostrare nell'app: tolgono la riga di credito che sta solo nella pagina GitHub.
 fn clean_notes(body: &str) -> String {
     body.lines()
-        .filter(|l| !l.contains("è stato scritto con l'aiuto di"))
+        .filter(|l| {
+            !l.contains("è stato scritto con l'aiuto di")
+                && !l.contains("was written with the help of")
+        })
         .collect::<Vec<_>>()
         .join("\n")
         .trim()
@@ -141,7 +151,7 @@ fn clean_notes(body: &str) -> String {
 fn parse_release(v: &serde_json::Value, current: &str) -> Result<Option<Release>> {
     let tag = v["tag_name"]
         .as_str()
-        .ok_or_else(|| anyhow!("release senza tag"))?;
+        .ok_or_else(|| anyhow!(tr!("release senza tag", "release without a tag")))?;
     let latest = semver::Version::parse(tag.trim_start_matches('v'))?;
     if latest <= semver::Version::parse(current)? {
         return Ok(None);
@@ -173,15 +183,21 @@ fn make_executable(_: &std::path::Path) -> Result<()> {
 }
 
 pub fn apply(rel: &Release, status: &mut dyn FnMut(String)) -> Result<()> {
-    let url = rel
-        .asset_url
-        .as_ref()
-        .ok_or_else(|| anyhow!("la release non contiene il file per questo sistema"))?;
-    let name = asset_name().ok_or_else(|| anyhow!("sistema non supportato"))?;
+    let url = rel.asset_url.as_ref().ok_or_else(|| {
+        anyhow!(tr!(
+            "la release non contiene il file per questo sistema",
+            "the release does not contain the file for this system"
+        ))
+    })?;
+    let name =
+        asset_name().ok_or_else(|| anyhow!(tr!("sistema non supportato", "unsupported system")))?;
     let tmp = tools::data_dir().join("update").join(name);
     net::download(url, &tmp, &mut |d, t| {
         let p = t.filter(|t| *t > 0).map(|t| d * 100 / t).unwrap_or(0);
-        status(format!("Scarico Grabbit {}… {p}%", rel.version));
+        status(tr!(
+            format!("Scarico Grabbit {}… {p}%", rel.version),
+            format!("Downloading Grabbit {}… {p}%", rel.version)
+        ));
     })?;
     make_executable(&tmp)?;
 
@@ -189,7 +205,12 @@ pub fn apply(rel: &Release, status: &mut dyn FnMut(String)) -> Result<()> {
     {
         let appimage = std::env::var_os("APPIMAGE")
             .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("l'aggiornamento automatico richiede la versione AppImage"))?;
+            .ok_or_else(|| {
+                anyhow!(tr!(
+                    "l'aggiornamento automatico richiede la versione AppImage",
+                    "automatic updates require the AppImage version"
+                ))
+            })?;
         // si copia accanto all'AppImage e poi si rinomina (atomico, anche se in uso)
         let staged = appimage.with_extension("new");
         fs::copy(&tmp, &staged)?;
@@ -301,7 +322,7 @@ mod tests {
     #[test]
     fn errors_are_described() {
         let e = anyhow::Error::new(ureq::Error::StatusCode(403));
-        assert!(describe_error(&e).contains("limitato"));
+        assert!(describe_error(&e).contains(tr!("limitato", "rate-limited")));
         let e = anyhow::Error::new(ureq::Error::StatusCode(500));
         assert!(describe_error(&e).contains("500"));
         assert_eq!(status_code(&anyhow::anyhow!("altro")), None);

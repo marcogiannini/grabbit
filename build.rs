@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Incorpora l'icona (e i metadati di versione) nell'eseguibile Windows.
 // Su Linux/macOS non fa nulla.
 fn main() {

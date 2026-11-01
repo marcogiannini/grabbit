@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Nuova versione da pubblicare, es. 0.2.0 (vuoto = solo compilare, senza pubblicare)"
+        description: "New version to publish, e.g. 0.2.0 (empty = build only, do not publish)"
         required: false
         type: string
 
@@ -217,7 +217,7 @@ jobs:
           name: Grabbit ${{ needs.prepare.outputs.version }}
           files: release/*
           fail_on_unmatched_files: true
-          # testo fisso in cima alle note; sotto GitHub aggiunge l'elenco automatico delle modifiche
+          # fixed text at the top of the notes; GitHub adds the automatic change list below
           body: |
-            Questo programma è stato scritto con l'aiuto di [Claude](https://claude.ai), l'assistente AI di Anthropic.
+            This program was written with the help of [Claude](https://claude.ai), Anthropic's AI assistant.
           generate_release_notes: true

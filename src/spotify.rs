@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Supporto ai link Spotify.
 //!
 //! Spotify protegge l'audio con DRM e yt-dlp non lo scarica. Come fanno altri
@@ -7,6 +8,7 @@
 //!
 //! Limite: la pagina embed pubblica mostra al massimo ~100 brani per playlist.
 use crate::net;
+use crate::tr;
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
@@ -43,14 +45,20 @@ fn parse(s: &str) -> Option<(String, String)> {
 }
 
 fn next_data(html: &str) -> Result<Value> {
-    let i = html
-        .find("id=\"__NEXT_DATA__\"")
-        .ok_or_else(|| anyhow!("pagina Spotify in un formato inatteso"))?;
+    let i = html.find("id=\"__NEXT_DATA__\"").ok_or_else(|| {
+        anyhow!(tr!(
+            "pagina Spotify in un formato inatteso",
+            "Spotify page in an unexpected format"
+        ))
+    })?;
     let rest = &html[i..];
-    let start = rest.find('>').ok_or_else(|| anyhow!("JSON non trovato"))? + 1;
+    let start = rest
+        .find('>')
+        .ok_or_else(|| anyhow!(tr!("JSON non trovato", "JSON not found")))?
+        + 1;
     let len = rest[start..]
         .find("</script>")
-        .ok_or_else(|| anyhow!("JSON non terminato"))?;
+        .ok_or_else(|| anyhow!(tr!("JSON non terminato", "JSON not terminated")))?;
     Ok(serde_json::from_str(&rest[start..start + len])?)
 }
 
@@ -75,13 +83,22 @@ fn clean(s: &str) -> String {
 }
 
 pub fn fetch(input: &str) -> Result<Collection> {
-    let (kind, id) = parse(input).ok_or_else(|| anyhow!("link Spotify non riconosciuto"))?;
+    let (kind, id) = parse(input).ok_or_else(|| {
+        anyhow!(tr!(
+            "link Spotify non riconosciuto",
+            "Spotify link not recognized"
+        ))
+    })?;
     if !matches!(kind.as_str(), "track" | "album" | "playlist") {
-        bail!("tipo di link Spotify non supportato: {kind}");
+        bail!(tr!(
+            "tipo di link Spotify non supportato: {kind}",
+            "unsupported Spotify link type: {kind}"
+        ));
     }
     let html = net::get_text(&format!("https://open.spotify.com/embed/{kind}/{id}"))?;
     let json = next_data(&html)?;
-    let entity = find_key(&json, "entity").ok_or_else(|| anyhow!("dati Spotify non trovati"))?;
+    let entity = find_key(&json, "entity")
+        .ok_or_else(|| anyhow!(tr!("dati Spotify non trovati", "Spotify data not found")))?;
     let name = text(entity, &["name", "title"])
         .unwrap_or("Spotify")
         .to_string();
@@ -98,7 +115,10 @@ pub fn fetch(input: &str) -> Result<Collection> {
             })
             .collect();
         if tracks.is_empty() {
-            bail!("nessun brano trovato (playlist privata o vuota?)");
+            bail!(tr!(
+                "nessun brano trovato (playlist privata o vuota?)",
+                "no tracks found (private or empty playlist?)"
+            ));
         }
         return Ok(Collection { name, tracks });
     }

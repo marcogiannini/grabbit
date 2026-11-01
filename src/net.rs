@@ -1,4 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 //! Piccoli helper HTTP (ureq 3): JSON, testo e download con avanzamento.
+use crate::tr;
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -21,7 +23,12 @@ pub fn get_json(url: &str) -> Result<serde_json::Value> {
         .get(url)
         .header("Accept", "application/vnd.github+json")
         .call()
-        .with_context(|| format!("richiesta a {url} fallita"))?;
+        .with_context(|| {
+            tr!(
+                format!("richiesta a {url} fallita"),
+                format!("request to {url} failed")
+            )
+        })?;
     Ok(resp.body_mut().read_json()?)
 }
 
@@ -30,7 +37,12 @@ pub fn get_text(url: &str) -> Result<String> {
         .get(url)
         .header("Accept-Language", "en-US,en;q=0.8")
         .call()
-        .with_context(|| format!("richiesta a {url} fallita"))?;
+        .with_context(|| {
+            tr!(
+                format!("richiesta a {url} fallita"),
+                format!("request to {url} failed")
+            )
+        })?;
     Ok(resp.body_mut().read_to_string()?)
 }
 
@@ -40,10 +52,12 @@ pub fn download(url: &str, dest: &Path, progress: &mut dyn FnMut(u64, Option<u64
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }
-    let resp = agent()
-        .get(url)
-        .call()
-        .with_context(|| format!("download di {url} fallito"))?;
+    let resp = agent().get(url).call().with_context(|| {
+        tr!(
+            format!("download di {url} fallito"),
+            format!("download of {url} failed")
+        )
+    })?;
     let total = resp.body().content_length();
     let mut reader = resp.into_body().into_reader();
 
