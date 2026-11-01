@@ -1,6 +1,6 @@
 [package]
 name = "grabbit"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 description = "Scarica video e musica da YouTube e Spotify con yt-dlp, con interfaccia grafica semplice"

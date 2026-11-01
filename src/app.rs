@@ -894,8 +894,12 @@ fn load_logo(ctx: &egui::Context) -> egui::TextureHandle {
 }
 
 fn configure_style(ctx: &egui::Context) {
-    // sempre scuro, anche se il sistema è in modalità chiara
+    // Interfaccia sempre scura, anche se il sistema è in modalità chiara.
+    // La barra del titolo, invece, la lascia gestire al sistema: forzarne il
+    // tema da qui la rendeva chiara senza pulsanti su Windows al primo avvio
+    // e non seguiva il tema di sistema su Linux.
     ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.options_mut(|o| o.sync_window_theme = false);
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 7.0);
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
